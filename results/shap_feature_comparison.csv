@@ -1,0 +1,31 @@
+feature,mean_abs_shap,feature_set
+GenHlth,0.59613323,Original Features
+HighBP,0.4594102,Original Features
+BMI,0.4116293,Original Features
+Age,0.3816522,Original Features
+HighChol,0.27910304,Original Features
+Income,0.13290174,Original Features
+Sex,0.11357453,Original Features
+HeartDiseaseorAttack,0.06515064,Original Features
+HvyAlcoholConsump,0.05653742,Original Features
+CholCheck,0.053723443,Original Features
+GenHlth,0.5789864,Without Sensitive Attributes
+HighBP,0.55045134,Without Sensitive Attributes
+BMI,0.4003105,Without Sensitive Attributes
+HighChol,0.31430626,Without Sensitive Attributes
+Income,0.13766861,Without Sensitive Attributes
+MentHlth,0.107000194,Without Sensitive Attributes
+HeartDiseaseorAttack,0.09787094,Without Sensitive Attributes
+DiffWalk,0.080728635,Without Sensitive Attributes
+HvyAlcoholConsump,0.062267344,Without Sensitive Attributes
+CholCheck,0.05875941,Without Sensitive Attributes
+GenHlth,0.6092844,Without Sensitive Attributes + Proxy-Reduced Features
+HighBP,0.5621116,Without Sensitive Attributes + Proxy-Reduced Features
+BMI,0.39552614,Without Sensitive Attributes + Proxy-Reduced Features
+HighChol,0.31516853,Without Sensitive Attributes + Proxy-Reduced Features
+MentHlth,0.10868486,Without Sensitive Attributes + Proxy-Reduced Features
+HeartDiseaseorAttack,0.099986844,Without Sensitive Attributes + Proxy-Reduced Features
+DiffWalk,0.098628044,Without Sensitive Attributes + Proxy-Reduced Features
+HvyAlcoholConsump,0.06562964,Without Sensitive Attributes + Proxy-Reduced Features
+CholCheck,0.05884359,Without Sensitive Attributes + Proxy-Reduced Features
+Smoker,0.038839187,Without Sensitive Attributes + Proxy-Reduced Features
