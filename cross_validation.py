@@ -3,24 +3,51 @@ import pandas as pd
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.base import clone
+import copy
+from sklearn.utils.class_weight import compute_sample_weight
 
 from config import RESULTS_DIR, RANDOM_STATE, N_SPLITS
 from models import get_models
 from metrics import append_metric_dict
 
 
-def cross_validate_models(feature_sets, y, fairness_df):
+def fit_model(model_name, model, X_train, y_train, fairness_train):
     """
-    Runs stratified cross-validation for all models across all feature sets.
-
-    For each fold:
-    - train the model
-    - predict labels
-    - predict probabilities where available
-    - compute utility and fairness metrics
+    Handles normal sklearn models, MLP sample weights, and Fairlearn's special API.
     """
+    if model_name == "Fairlearn-DP":
+        sensitive_features = fairness_train["sex_group"]
+        model.fit(X_train, y_train, sensitive_features=sensitive_features)
+        return model
 
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    if model_name == "MLP":
+        sample_weight = compute_sample_weight(
+            class_weight="balanced",
+            y=y_train,
+        )
+
+        # MLP is inside a pipeline, so pass sample weights to the final step.
+        model.fit(X_train, y_train, model__sample_weight=sample_weight)
+        return model
+
+    model.fit(X_train, y_train)
+    return model
+
+
+def get_prediction_probabilities(model, X_test):
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(X_test)[:, 1]
+
+    if hasattr(model, "decision_function"):
+        scores = model.decision_function(X_test)
+        return scores
+
+    return model.predict(X_test)
+
+
+def cross_validate_models(feature_sets, y, fairness_df, experiment_name="raw_dataset"):
+    output_dir = RESULTS_DIR / experiment_name
+    os.makedirs(output_dir, exist_ok=True)
 
     all_results = []
 
@@ -32,6 +59,7 @@ def cross_validate_models(feature_sets, y, fairness_df):
 
     for feature_set_name, X in feature_sets.items():
         print("\n" + "=" * 80)
+        print(f"Experiment: {experiment_name}")
         print(f"Running feature set: {feature_set_name}")
         print("=" * 80)
 
@@ -51,18 +79,24 @@ def cross_validate_models(feature_sets, y, fairness_df):
                 y_train = y.iloc[train_idx].copy()
                 y_test = y.iloc[test_idx].copy()
 
+                fairness_train = fairness_df.iloc[train_idx].copy()
                 fairness_test = fairness_df.iloc[test_idx].copy()
 
-                fold_model = clone(model)
+                try:
+                    fold_model = clone(model)
+                except RuntimeError:
+                    fold_model = copy.deepcopy(model)
 
-                fold_model.fit(X_train, y_train)
+                fold_model = fit_model(
+                    model_name=model_name,
+                    model=fold_model,
+                    X_train=X_train,
+                    y_train=y_train,
+                    fairness_train=fairness_train,
+                )
 
                 y_pred = fold_model.predict(X_test)
-
-                if hasattr(fold_model, "predict_proba"):
-                    y_prob = fold_model.predict_proba(X_test)[:, 1]
-                else:
-                    y_prob = y_pred
+                y_prob = get_prediction_probabilities(fold_model, X_test)
 
                 append_metric_dict(
                     results_list=fold_results,
@@ -76,26 +110,17 @@ def cross_validate_models(feature_sets, y, fairness_df):
 
             fold_df = pd.DataFrame(fold_results)
 
-            mean_row = {
-                "model": model_name,
-                "feature_set": feature_set_name,
-            }
-
-            std_row = {
-                "model": model_name,
-                "feature_set": feature_set_name,
-            }
-
-            numeric_cols = fold_df.select_dtypes(include="number").columns
-
-            for col in numeric_cols:
-                mean_row[f"{col}_mean"] = fold_df[col].mean()
-                std_row[f"{col}_std"] = fold_df[col].std()
+            fold_output_path = output_dir / f"{model_name}_{feature_set_name}_fold_results.csv"
+            safe_fold_output_path = str(fold_output_path).replace(" ", "_").replace("+", "plus")
+            fold_df.to_csv(safe_fold_output_path, index=False)
 
             combined_row = {
                 "model": model_name,
                 "feature_set": feature_set_name,
+                "experiment": experiment_name,
             }
+
+            numeric_cols = fold_df.select_dtypes(include="number").columns
 
             for col in numeric_cols:
                 combined_row[f"{col}_mean"] = fold_df[col].mean()
@@ -105,7 +130,7 @@ def cross_validate_models(feature_sets, y, fairness_df):
 
     results_df = pd.DataFrame(all_results)
 
-    output_path = f"{RESULTS_DIR}/final_cv_results_all_models.csv"
+    output_path = output_dir / "final_cv_results_all_models.csv"
     results_df.to_csv(output_path, index=False)
 
     print("\n" + "=" * 80)
@@ -117,22 +142,36 @@ def cross_validate_models(feature_sets, y, fairness_df):
 
 
 def format_results_for_display(results_df):
-    """
-    Creates a readable version of the CV results.
-    """
     display_cols = [
+        "experiment",
         "model",
         "feature_set",
         "accuracy_mean",
         "precision_mean",
         "recall_mean",
+        "fnr_mean",
         "f1_mean",
         "auc_mean",
+        "brier_mean",
+
         "sex_group_dp_diff_mean",
+        "sex_group_fnr_gap_mean",
+        "sex_group_worst_group_sensitivity_mean",
+        "sex_group_macro_avg_fnr_mean",
+        "sex_group_group_auc_mean_mean",
+        "sex_group_group_brier_mean_mean",
+
         "age_group_dp_diff_mean",
+        "age_group_fnr_gap_mean",
+        "age_group_worst_group_sensitivity_mean",
+        "age_group_macro_avg_fnr_mean",
+
         "income_group_dp_diff_mean",
         "education_group_dp_diff_mean",
         "intersection_group_equalized_odds_diff_mean",
+        "intersection_group_fnr_gap_mean",
+        "intersection_group_worst_group_sensitivity_mean",
+        "intersection_group_macro_avg_fnr_mean",
     ]
 
     existing_cols = [col for col in display_cols if col in results_df.columns]
@@ -146,14 +185,15 @@ def format_results_for_display(results_df):
 
 
 if __name__ == "__main__":
-    from data_loader_diabetes import load_diabetes_data
+    from data_loader_diabetes import load_raw_diabetes_data
 
-    feature_sets, y, fairness_df, df = load_diabetes_data(print_summary=False)
+    feature_sets, y, fairness_df, df = load_raw_diabetes_data(print_summary=False)
 
     results_df = cross_validate_models(
         feature_sets=feature_sets,
         y=y,
         fairness_df=fairness_df,
+        experiment_name="raw_dataset",
     )
 
     print("\nReadable results:")

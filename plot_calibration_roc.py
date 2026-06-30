@@ -4,28 +4,10 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import roc_curve, auc
-from xgboost import XGBClassifier
+from models import make_xgb_model
 
 from config import GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
 from data_loader_diabetes import load_diabetes_data
-
-
-def make_xgb_model():
-    """
-    XGBoost model used for group-wise calibration and ROC analysis.
-    We use one stable model so the curves are easy to compare.
-    """
-    return XGBClassifier(
-        n_estimators=250,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        eval_metric="logloss",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
-
 
 def plot_calibration_by_group(y_true, y_prob, group_values, group_name, output_path):
     plt.figure(figsize=(8, 6))
@@ -159,7 +141,7 @@ def main():
         stratify=y,
     )
 
-    model = make_xgb_model()
+    model = make_xgb_model(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
 
     y_prob = model.predict_proba(X_test)[:, 1]

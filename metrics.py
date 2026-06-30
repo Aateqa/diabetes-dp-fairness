@@ -7,6 +7,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     roc_auc_score,
+    brier_score_loss,
 )
 
 
@@ -16,21 +17,50 @@ def safe_divide(numerator, denominator):
     return numerator / denominator
 
 
-def compute_group_rates(y_true, y_pred, group_values):
+def safe_auc(y_true, y_prob):
+    if len(np.unique(y_true)) < 2:
+        return np.nan
+
+    try:
+        return roc_auc_score(y_true, y_prob)
+    except ValueError:
+        return np.nan
+
+
+def safe_brier(y_true, y_prob):
+    try:
+        return brier_score_loss(y_true, y_prob)
+    except ValueError:
+        return np.nan
+
+
+def compute_group_rates(y_true, y_pred, y_prob, group_values, min_group_size=500):
     """
-    Computes selection rate, TPR, FPR, FNR, and accuracy per group.
+    Computes selection rate, TPR, FPR, FNR, accuracy, AUC, and Brier score per group.
+
+    Groups with fewer than min_group_size rows are warned because fairness metrics
+    may be unstable for small groups.
     """
     rows = []
 
     y_true = pd.Series(y_true).reset_index(drop=True)
     y_pred = pd.Series(y_pred).reset_index(drop=True)
+    y_prob = pd.Series(y_prob).reset_index(drop=True)
     group_values = pd.Series(group_values).reset_index(drop=True)
 
-    for group in sorted(group_values.unique()):
+    for group in sorted(group_values.dropna().unique()):
         mask = group_values == group
+        n_samples = int(mask.sum())
 
         group_y_true = y_true[mask]
         group_y_pred = y_pred[mask]
+        group_y_prob = y_prob[mask]
+
+        if n_samples < min_group_size:
+            print(
+                f"WARNING: group '{group}' has only {n_samples} rows. "
+                "Fairness metrics may be unstable."
+            )
 
         tp = ((group_y_true == 1) & (group_y_pred == 1)).sum()
         tn = ((group_y_true == 0) & (group_y_pred == 0)).sum()
@@ -45,28 +75,34 @@ def compute_group_rates(y_true, y_pred, group_values):
 
         rows.append({
             "group": group,
-            "n_samples": int(mask.sum()),
+            "n_samples": n_samples,
             "selection_rate": selection_rate,
             "tpr": tpr,
             "fpr": fpr,
             "fnr": fnr,
             "accuracy": accuracy,
+            "auc": safe_auc(group_y_true, group_y_prob),
+            "brier": safe_brier(group_y_true, group_y_prob),
         })
 
     return pd.DataFrame(rows)
 
 
-def compute_fairness_metrics(y_true, y_pred, protected_values):
-    """
-    Computes fairness gaps for one protected attribute.
-    """
-    group_rates = compute_group_rates(y_true, y_pred, protected_values)
+def compute_fairness_metrics(y_true, y_pred, y_prob, protected_values):
+    group_rates = compute_group_rates(
+        y_true=y_true,
+        y_pred=y_pred,
+        y_prob=y_prob,
+        group_values=protected_values,
+    )
 
     selection_rates = group_rates["selection_rate"].dropna()
     tprs = group_rates["tpr"].dropna()
     fprs = group_rates["fpr"].dropna()
     fnrs = group_rates["fnr"].dropna()
     accuracies = group_rates["accuracy"].dropna()
+    aucs = group_rates["auc"].dropna()
+    briers = group_rates["brier"].dropna()
 
     dp_diff = selection_rates.max() - selection_rates.min()
     tpr_gap = tprs.max() - tprs.min()
@@ -79,6 +115,8 @@ def compute_fairness_metrics(y_true, y_pred, protected_values):
     else:
         di_ratio = selection_rates.min() / selection_rates.max()
 
+    # Non-standard definition used in this project:
+    # equalized_odds_diff = max(tpr_gap, fpr_gap)
     equalized_odds_diff = max(tpr_gap, fpr_gap)
 
     return {
@@ -89,13 +127,14 @@ def compute_fairness_metrics(y_true, y_pred, protected_values):
         "fnr_gap": fnr_gap,
         "accuracy_gap": accuracy_gap,
         "equalized_odds_diff": equalized_odds_diff,
+        "worst_group_sensitivity": tprs.min(),
+        "macro_avg_fnr": fnrs.mean(),
+        "group_auc_mean": aucs.mean() if len(aucs) > 0 else np.nan,
+        "group_brier_mean": briers.mean() if len(briers) > 0 else np.nan,
     }
 
 
 def compute_all_metrics(y_true, y_pred, y_prob, fairness_df):
-    """
-    Computes utility metrics and fairness metrics for all protected attributes.
-    """
     results = {}
 
     results["accuracy"] = accuracy_score(y_true, y_pred)
@@ -103,17 +142,16 @@ def compute_all_metrics(y_true, y_pred, y_prob, fairness_df):
     results["recall"] = recall_score(y_true, y_pred, zero_division=0)
     results["f1"] = f1_score(y_true, y_pred, zero_division=0)
 
-    try:
-        results["auc"] = roc_auc_score(y_true, y_prob)
-    except ValueError:
-        results["auc"] = np.nan
-
+    results["auc"] = safe_auc(y_true, y_prob)
+    results["brier"] = safe_brier(y_true, y_prob)
     results["error_rate"] = 1 - results["accuracy"]
+    results["fnr"] = 1 - results["recall"]
 
     for protected_attr in fairness_df.columns:
         fairness_metrics = compute_fairness_metrics(
             y_true=y_true,
             y_pred=y_pred,
+            y_prob=y_prob,
             protected_values=fairness_df[protected_attr],
         )
 
@@ -123,7 +161,15 @@ def compute_all_metrics(y_true, y_pred, y_prob, fairness_df):
     return results
 
 
-def append_metric_dict(results_list, model_name, feature_set_name, y_true, y_pred, y_prob, fairness_df):
+def append_metric_dict(
+    results_list,
+    model_name,
+    feature_set_name,
+    y_true,
+    y_pred,
+    y_prob,
+    fairness_df,
+):
     metrics = compute_all_metrics(
         y_true=y_true,
         y_pred=y_pred,

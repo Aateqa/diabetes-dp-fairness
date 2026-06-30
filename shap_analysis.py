@@ -4,27 +4,10 @@ import matplotlib.pyplot as plt
 import shap
 
 from sklearn.model_selection import train_test_split
-from xgboost import XGBClassifier
+from models import make_xgb_model
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
 from data_loader_diabetes import load_diabetes_data
-
-
-def make_xgb_model():
-    """
-    XGBoost model used for SHAP explainability.
-    """
-    return XGBClassifier(
-        n_estimators=250,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        eval_metric="logloss",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
-
 
 def clean_name(name):
     return (
@@ -53,7 +36,7 @@ def run_shap_for_feature_set(feature_set_name, X, y):
         stratify=y,
     )
 
-    model = make_xgb_model()
+    model = make_xgb_model(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
 
     # Use a sample for speed because the dataset is large.

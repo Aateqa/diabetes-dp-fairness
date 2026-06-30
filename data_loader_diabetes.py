@@ -1,20 +1,25 @@
 import pandas as pd
 
 from config import (
-    DATA_FILE,
+    RAW_DATA_FILE,
+    BALANCED_DATA_FILE,
     TARGET_COLUMN,
     SENSITIVE_COLUMNS,
     PROXY_COLUMNS,
     PROTECTED_ATTRIBUTES,
+    BINARY_COLUMNS,
+    ORDINAL_COLUMNS,
 )
+
+from feature_engineering import feature_engineering
+
+
+SENSITIVE_DERIVED_COLUMNS = [
+    "age_bmi_risk",
+]
 
 
 def create_sex_group(value):
-    """
-    BRFSS Sex encoding:
-    0 = female
-    1 = male
-    """
     if value == 0:
         return "female"
     if value == 1:
@@ -23,14 +28,6 @@ def create_sex_group(value):
 
 
 def create_age_group(value):
-    """
-    BRFSS Age is already ordinal-coded from 1 to 13.
-
-    Approximate grouping:
-    1-5   = younger adults
-    6-9   = middle-aged adults
-    10-13 = older adults
-    """
     if value <= 5:
         return "young"
     if value <= 9:
@@ -39,14 +36,6 @@ def create_age_group(value):
 
 
 def create_income_group(value):
-    """
-    BRFSS Income is ordinal-coded from 1 to 8.
-
-    Approximate grouping:
-    1-3 = low income
-    4-6 = middle income
-    7-8 = high income
-    """
     if value <= 3:
         return "low_income"
     if value <= 6:
@@ -56,25 +45,57 @@ def create_income_group(value):
 
 def create_education_group(value):
     """
-    BRFSS Education is ordinal-coded from 1 to 6.
-
-    Approximate grouping:
-    1-3 = low education
-    4-5 = middle education
-    6   = high education
+    Uses merged Education_fair_group, where original levels 1 and 2 are combined.
     """
-    if value <= 3:
+    if value <= 2:
         return "low_education"
     if value <= 5:
         return "middle_education"
     return "high_education"
 
 
-def load_diabetes_dataframe():
+def preprocess_dataframe(df):
     """
-    Loads the diabetes dataset and creates protected group columns.
+    Applies required dataset fixes before modelling.
+
+    Fixes:
+    - Remove duplicate rows before any processing.
+    - Cap BMI at 60.
+    - Cast binary columns to int8.
+    - Cast ordinal columns to int16.
+    - Apply diabetes-specific feature engineering.
     """
-    df = pd.read_csv(DATA_FILE)
+    df = df.copy()
+
+    before = len(df)
+    df = df.drop_duplicates().reset_index(drop=True)
+    removed = before - len(df)
+    print(f"Removed duplicate rows: {removed}")
+
+    if "BMI" in df.columns:
+        df["BMI"] = df["BMI"].clip(upper=60)
+
+    for col in BINARY_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype("int8")
+
+    for col in ORDINAL_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype("int16")
+
+    if TARGET_COLUMN in df.columns:
+        df[TARGET_COLUMN] = df[TARGET_COLUMN].astype("int8")
+
+    df = feature_engineering(df)
+
+    return df
+
+
+def load_diabetes_dataframe(data_file=RAW_DATA_FILE):
+    """
+    Loads one diabetes CSV file, applies preprocessing, and creates fairness group columns.
+    """
+    df = pd.read_csv(data_file)
 
     if TARGET_COLUMN not in df.columns:
         raise ValueError(
@@ -91,12 +112,15 @@ def load_diabetes_dataframe():
                 f"Available columns: {list(df.columns)}"
             )
 
-    df = df.copy()
+    df = preprocess_dataframe(df)
 
     df["sex_group"] = df["Sex"].apply(create_sex_group)
     df["age_group"] = df["Age"].apply(create_age_group)
     df["income_group"] = df["Income"].apply(create_income_group)
-    df["education_group"] = df["Education"].apply(create_education_group)
+
+    # Use merged education group for fairness.
+    df["education_group"] = df["Education_fair_group"].apply(create_education_group)
+
     df["intersection_group"] = df["sex_group"] + "_" + df["age_group"]
 
     return df
@@ -107,15 +131,15 @@ def build_feature_sets(df):
     Builds three feature sets:
 
     1. Original Features:
-       Keeps all original input features.
+       Keeps all cleaned and engineered features.
 
     2. Without Sensitive Attributes:
-       Removes direct sensitive attributes: Sex and Age.
+       Removes direct sensitive attributes and sensitive-derived engineered features.
 
     3. Without Sensitive Attributes + Proxy-Reduced Features:
-       Removes Sex, Age, Income, and Education.
+       Removes direct sensitive attributes, sensitive-derived engineered features,
+       and socioeconomic proxy columns.
     """
-
     y = df[TARGET_COLUMN].astype(int)
 
     fairness_df = df[PROTECTED_ATTRIBUTES].copy()
@@ -130,18 +154,26 @@ def build_feature_sets(df):
 
     base_drop_columns = [TARGET_COLUMN] + generated_group_columns
 
-    # Feature Set 1: Original features
-    X_original = df.drop(columns=base_drop_columns, errors="ignore")
-
-    # Feature Set 2: Remove direct sensitive attributes
-    X_no_sensitive = df.drop(
-        columns=base_drop_columns + SENSITIVE_COLUMNS,
+    # Feature Set 1: all cleaned original + engineered features.
+    X_original = df.drop(
+        columns=base_drop_columns,
         errors="ignore",
     )
 
-    # Feature Set 3: Remove sensitive attributes and proxy variables
+    # Feature Set 2: remove direct sensitive attributes and features derived from them.
+    X_no_sensitive = df.drop(
+        columns=base_drop_columns + SENSITIVE_COLUMNS + SENSITIVE_DERIVED_COLUMNS,
+        errors="ignore",
+    )
+
+    # Feature Set 3: remove sensitive attributes, sensitive-derived columns, and proxies.
     X_proxy_reduced = df.drop(
-        columns=base_drop_columns + SENSITIVE_COLUMNS + PROXY_COLUMNS,
+        columns=(
+            base_drop_columns
+            + SENSITIVE_COLUMNS
+            + SENSITIVE_DERIVED_COLUMNS
+            + PROXY_COLUMNS
+        ),
         errors="ignore",
     )
 
@@ -156,7 +188,8 @@ def build_feature_sets(df):
 
 def print_eda_summary(df, feature_sets, y, fairness_df):
     """
-    Prints a quick EDA summary to confirm the data loaded correctly.
+    Prints a quick EDA summary to confirm that loading, preprocessing,
+    grouping, and feature-set construction worked correctly.
     """
     print("\n" + "=" * 80)
     print("DIABETES DATASET EDA SUMMARY")
@@ -164,9 +197,6 @@ def print_eda_summary(df, feature_sets, y, fairness_df):
 
     print("\nDataset shape:")
     print(df.shape)
-
-    print("\nColumns:")
-    print(list(df.columns))
 
     print("\nTarget distribution:")
     print(y.value_counts().sort_index())
@@ -177,6 +207,7 @@ def print_eda_summary(df, feature_sets, y, fairness_df):
     print("\nMissing values:")
     missing = df.isna().sum()
     missing = missing[missing > 0]
+
     if len(missing) == 0:
         print("No missing values found.")
     else:
@@ -206,7 +237,7 @@ def print_eda_summary(df, feature_sets, y, fairness_df):
     print("=" * 80)
 
 
-def load_diabetes_data(print_summary=True):
+def load_diabetes_data(data_file=RAW_DATA_FILE, print_summary=True):
     """
     Main function used by other files.
 
@@ -216,7 +247,7 @@ def load_diabetes_data(print_summary=True):
         fairness_df: protected group dataframe
         df: full dataframe with generated protected group columns
     """
-    df = load_diabetes_dataframe()
+    df = load_diabetes_dataframe(data_file=data_file)
     feature_sets, y, fairness_df = build_feature_sets(df)
 
     if print_summary:
@@ -225,5 +256,19 @@ def load_diabetes_data(print_summary=True):
     return feature_sets, y, fairness_df, df
 
 
+def load_raw_diabetes_data(print_summary=True):
+    return load_diabetes_data(
+        data_file=RAW_DATA_FILE,
+        print_summary=print_summary,
+    )
+
+
+def load_balanced_diabetes_data(print_summary=True):
+    return load_diabetes_data(
+        data_file=BALANCED_DATA_FILE,
+        print_summary=print_summary,
+    )
+
+
 if __name__ == "__main__":
-    load_diabetes_data(print_summary=True)
+    load_raw_diabetes_data(print_summary=True)

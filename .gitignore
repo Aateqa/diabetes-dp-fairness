@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# CatBoost logs
+catboost_info/
+
+# Generated outputs
+graphs/
+results/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
