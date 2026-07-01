@@ -1,3 +1,6 @@
+import random
+
+import numpy as np
 import pandas as pd
 
 from data_loader_diabetes import (
@@ -5,7 +8,12 @@ from data_loader_diabetes import (
     load_balanced_diabetes_data,
 )
 from cross_validation import cross_validate_models, format_results_for_display
-from config import RESULTS_DIR
+from config import RESULTS_DIR, RANDOM_STATE
+
+
+def set_seed(seed=RANDOM_STATE):
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def run_experiment(loader_fn, experiment_name):
@@ -40,6 +48,7 @@ def run_experiment(loader_fn, experiment_name):
 
 
 def main():
+    set_seed()
     print("\nStarting diabetes fairness analysis...")
 
     raw_results = run_experiment(

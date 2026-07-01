@@ -4,45 +4,28 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.base import clone
 import copy
-from sklearn.utils.class_weight import compute_sample_weight
 
-from config import RESULTS_DIR, RANDOM_STATE, N_SPLITS
+from config import RESULTS_DIR, RANDOM_STATE, N_SPLITS, FAIRLEARN_SENSITIVE_ATTRIBUTE
 from models import get_models
-from metrics import append_metric_dict
+from metrics import append_metric_dict, get_probabilities
 
 
 def fit_model(model_name, model, X_train, y_train, fairness_train):
     """
     Handles normal sklearn models, MLP sample weights, and Fairlearn's special API.
     """
-    if model_name == "Fairlearn-DP":
-        sensitive_features = fairness_train["sex_group"]
+    if model_name in ("Fairlearn-DP", "VFAE"):
+        sensitive_features = fairness_train[FAIRLEARN_SENSITIVE_ATTRIBUTE]
         model.fit(X_train, y_train, sensitive_features=sensitive_features)
         return model
 
     if model_name == "MLP":
-        sample_weight = compute_sample_weight(
-            class_weight="balanced",
-            y=y_train,
-        )
-
-        # MLP is inside a pipeline, so pass sample weights to the final step.
-        model.fit(X_train, y_train, model__sample_weight=sample_weight)
+        model.fit(X_train, y_train)
         return model
 
     model.fit(X_train, y_train)
     return model
 
-
-def get_prediction_probabilities(model, X_test):
-    if hasattr(model, "predict_proba"):
-        return model.predict_proba(X_test)[:, 1]
-
-    if hasattr(model, "decision_function"):
-        scores = model.decision_function(X_test)
-        return scores
-
-    return model.predict(X_test)
 
 
 def cross_validate_models(feature_sets, y, fairness_df, experiment_name="raw_dataset"):
@@ -96,7 +79,7 @@ def cross_validate_models(feature_sets, y, fairness_df, experiment_name="raw_dat
                 )
 
                 y_pred = fold_model.predict(X_test)
-                y_prob = get_prediction_probabilities(fold_model, X_test)
+                y_prob = get_probabilities(fold_model, X_test)
 
                 append_metric_dict(
                     results_list=fold_results,
@@ -110,9 +93,13 @@ def cross_validate_models(feature_sets, y, fairness_df, experiment_name="raw_dat
 
             fold_df = pd.DataFrame(fold_results)
 
-            fold_output_path = output_dir / f"{model_name}_{feature_set_name}_fold_results.csv"
-            safe_fold_output_path = str(fold_output_path).replace(" ", "_").replace("+", "plus")
-            fold_df.to_csv(safe_fold_output_path, index=False)
+            safe_name = (
+                f"{model_name}_{feature_set_name}"
+                .replace(" ", "_")
+                .replace("+", "plus")
+            )
+            fold_output_path = output_dir / f"{safe_name}_fold_results.csv"
+            fold_df.to_csv(fold_output_path, index=False)
 
             combined_row = {
                 "model": model_name,

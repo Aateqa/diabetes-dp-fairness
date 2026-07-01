@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import roc_curve, auc
-from models import make_xgb_model
+from models.tree_ensemble import make_xgb_model
 
 from config import GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
 from data_loader_diabetes import load_diabetes_data

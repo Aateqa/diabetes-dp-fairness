@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score
 
 from config import (
     RESULTS_DIR,
@@ -15,24 +15,11 @@ from config import (
 )
 
 from data_loader_diabetes import load_raw_diabetes_data
-from models import make_xgb_model
+from metrics import safe_auc, get_probabilities, counterfactual_fairness_ratio
+from models.tree_ensemble import make_xgb_model
 
 
 N_COUNTERFACTUAL_SAMPLES = 500
-
-
-def safe_auc(y_true, y_prob):
-    try:
-        return roc_auc_score(y_true, y_prob)
-    except ValueError:
-        return np.nan
-
-
-def get_probabilities(model, X):
-    if hasattr(model, "predict_proba"):
-        return model.predict_proba(X)[:, 1]
-
-    return model.predict(X)
 
 
 def flip_sex_counterfactual(X_original):
@@ -97,6 +84,10 @@ def compute_counterfactual_change_summary(
 ):
     """
     Computes how much predictions and probabilities changed after counterfactual editing.
+
+    counterfactual_fairness_ratio is the fraction of individuals whose prediction
+    changes when the sensitive attribute is intervened upon (Kusner et al., 2017).
+    A model is perfectly counterfactually fair when this ratio is 0.
     """
     prediction_changed = original_pred != counterfactual_pred
     probability_change = counterfactual_prob - original_prob
@@ -104,6 +95,7 @@ def compute_counterfactual_change_summary(
     return {
         "counterfactual": name,
         "n_samples": len(original_pred),
+        "counterfactual_fairness_ratio": float(prediction_changed.mean()),
         "n_predictions_changed": int(prediction_changed.sum()),
         "percent_predictions_changed": float(prediction_changed.mean() * 100),
         "mean_absolute_probability_change": float(np.mean(np.abs(probability_change))),

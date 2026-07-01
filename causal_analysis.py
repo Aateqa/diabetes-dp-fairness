@@ -62,13 +62,12 @@ def estimate_adjusted_effect_with_logistic_regression(df):
     """
     Estimates adjusted obesity effect using logistic regression.
 
-    This is a practical supporting estimate:
-    Diabetes_binary ~ BMI_obese + Age
+    Diabetes_binary ~ BMI_obese + Age + Income + PhysActivity
 
     We estimate the average difference in predicted diabetes probability
-    when BMI_obese is changed from 0 to 1 while keeping Age fixed.
+    when BMI_obese is changed from 0 to 1 while keeping all covariates fixed.
     """
-    X = df[["BMI_obese", "Age"]].copy()
+    X = df[["BMI_obese", "Age", "Income", "PhysActivity"]].copy()
     y = df["Diabetes_binary"].astype(int)
 
     model = Pipeline([

@@ -11,6 +11,32 @@ from sklearn.metrics import (
 )
 
 
+def counterfactual_fairness_ratio(model, X, flip_fn):
+    """
+    Fraction of individuals whose prediction changes under a demographic intervention.
+
+    Operationalises counterfactual fairness (Kusner et al., 2017): a model is
+    counterfactually fair if its prediction is unchanged in the counterfactual
+    world where the sensitive attribute took a different value.
+
+    Lower = more counterfactually fair.
+    """
+    X_cf = flip_fn(X)
+    if X_cf is None:
+        return np.nan
+    original_pred = model.predict(X)
+    cf_pred = model.predict(X_cf)
+    return float((original_pred != cf_pred).mean())
+
+
+def get_probabilities(model, X):
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(X)[:, 1]
+    if hasattr(model, "decision_function"):
+        return model.decision_function(X)
+    return model.predict(X)
+
+
 def safe_divide(numerator, denominator):
     if denominator == 0:
         return np.nan

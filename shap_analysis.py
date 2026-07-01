@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import shap
 
 from sklearn.model_selection import train_test_split
-from models import make_xgb_model
+from models.tree_ensemble import make_xgb_model
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
 from data_loader_diabetes import load_diabetes_data
@@ -56,8 +56,8 @@ def run_shap_for_feature_set(feature_set_name, X, y):
 
     safe_name = clean_name(feature_set_name)
 
-    csv_output_path = f"{RESULTS_DIR}/xgb_{safe_name}_shap_importance.csv"
-    graph_output_path = f"{GRAPHS_DIR}/xgb_{safe_name}_shap_importance.png"
+    csv_output_path = RESULTS_DIR / f"xgb_{safe_name}_shap_importance.csv"
+    graph_output_path = GRAPHS_DIR / f"xgb_{safe_name}_shap_importance.png"
 
     feature_importance.to_csv(csv_output_path, index=False)
 
@@ -97,7 +97,7 @@ def plot_shap_feature_comparison(all_importances):
 
     combined_df = pd.concat(comparison_rows, ignore_index=True)
 
-    output_csv = f"{RESULTS_DIR}/shap_feature_comparison.csv"
+    output_csv = RESULTS_DIR / "shap_feature_comparison.csv"
     combined_df.to_csv(output_csv, index=False)
 
     plt.figure(figsize=(12, 8))
@@ -119,7 +119,7 @@ def plot_shap_feature_comparison(all_importances):
     plt.grid(axis="x", alpha=0.3)
     plt.tight_layout()
 
-    output_graph = f"{GRAPHS_DIR}/shap_feature_comparison.png"
+    output_graph = GRAPHS_DIR / "shap_feature_comparison.png"
     plt.savefig(output_graph, dpi=300)
     plt.close()
 

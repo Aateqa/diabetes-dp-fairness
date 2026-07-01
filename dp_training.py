@@ -5,13 +5,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-
-from diffprivlib.models import LogisticRegression as DPLogisticRegression
 
 from config import (
     RESULTS_DIR,
@@ -21,86 +16,11 @@ from config import (
 )
 
 from data_loader_diabetes import load_raw_diabetes_data
+from metrics import safe_auc, get_probabilities, compute_fairness_metrics
+from models.dp_model import make_dp_lr, make_non_private_lr
 
 
 EPSILON_VALUES = [0.1, 0.5, 1.0, 5.0, np.inf]
-
-
-def safe_auc(y_true, y_prob):
-    """
-    Safely computes ROC-AUC.
-    Returns NaN if AUC cannot be computed.
-    """
-    try:
-        return roc_auc_score(y_true, y_prob)
-    except ValueError:
-        return np.nan
-
-
-def compute_dp_diff(y_pred, sensitive_values):
-    """
-    Computes demographic parity difference.
-
-    DP difference = max group selection rate - min group selection rate.
-    Selection rate = proportion predicted positive.
-    """
-    y_pred = pd.Series(y_pred).reset_index(drop=True)
-    sensitive_values = pd.Series(sensitive_values).reset_index(drop=True)
-
-    selection_rates = []
-
-    for group in sorted(sensitive_values.dropna().unique()):
-        mask = sensitive_values == group
-        group_selection_rate = y_pred[mask].mean()
-        selection_rates.append(group_selection_rate)
-
-    if len(selection_rates) == 0:
-        return np.nan
-
-    return max(selection_rates) - min(selection_rates)
-
-
-def get_probabilities(model, X_test):
-    """
-    Gets positive-class probabilities.
-    """
-    if hasattr(model, "predict_proba"):
-        return model.predict_proba(X_test)[:, 1]
-
-    return model.predict(X_test)
-
-
-def make_non_private_lr():
-    """
-    Non-private Logistic Regression baseline, used for epsilon = infinity.
-    """
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", LogisticRegression(
-            max_iter=1000,
-            class_weight="balanced",
-            solver="liblinear",
-            random_state=RANDOM_STATE,
-        )),
-    ])
-
-
-def make_dp_lr(epsilon):
-    """
-    Differentially private Logistic Regression.
-
-    diffprivlib's LogisticRegression needs numeric features.
-    We scale features before fitting the private model.
-    """
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", DPLogisticRegression(
-            epsilon=epsilon,
-            data_norm=10.0,
-            max_iter=1000,
-            random_state=RANDOM_STATE,
-        )),
-    ])
 
 
 def train_and_evaluate_dp_lr(
@@ -130,17 +50,22 @@ def train_and_evaluate_dp_lr(
     y_pred = model.predict(X_test)
     y_prob = get_probabilities(model, X_test)
 
-    accuracy = accuracy_score(y_test, y_pred)
-    auc = safe_auc(y_test, y_prob)
-    dp_diff = compute_dp_diff(y_pred, sensitive_test)
+    recall = recall_score(y_test, y_pred, zero_division=0)
+    fairness = compute_fairness_metrics(y_test, y_pred, y_prob, sensitive_test)
 
     return {
         "epsilon": epsilon_label,
         "epsilon_numeric": 999 if np.isinf(epsilon) else epsilon,
         "is_private": is_private,
-        "accuracy": accuracy,
-        "auc": auc,
-        "dp_diff": dp_diff,
+        "accuracy": accuracy_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred, zero_division=0),
+        "recall": recall,
+        "f1": f1_score(y_test, y_pred, zero_division=0),
+        "fnr": 1 - recall,
+        "auc": safe_auc(y_test, y_prob),
+        "dp_diff": fairness["dp_diff"],
+        "fnr_gap": fairness["fnr_gap"],
+        "worst_group_sensitivity": fairness["worst_group_sensitivity"],
     }
 
 
@@ -178,7 +103,7 @@ def plot_privacy_utility_fairness_tradeoff(results_df, output_path):
 
     plt.xlabel("Privacy budget ε")
     plt.ylabel("ROC-AUC")
-    plt.title("DP Logistic Regression: Privacy–Utility–Fairness Tradeoff")
+    plt.title("DP Logistic Regression: Privacy-Utility-Fairness Tradeoff")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
@@ -242,9 +167,11 @@ def run_dp_experiment():
 
         print(
             f"epsilon={row['epsilon']} | "
-            f"accuracy={row['accuracy']:.4f} | "
             f"auc={row['auc']:.4f} | "
-            f"dp_diff={row['dp_diff']:.4f}"
+            f"f1={row['f1']:.4f} | "
+            f"recall={row['recall']:.4f} | "
+            f"dp_diff={row['dp_diff']:.4f} | "
+            f"fnr_gap={row['fnr_gap']:.4f}"
         )
 
     results_df = pd.DataFrame(results)

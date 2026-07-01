@@ -22,12 +22,14 @@ def feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
         df["high_physical_burden"] = (df["PhysHlth"] >= 14).astype("int8")
         df = df.drop(columns=["PhysHlth"])
 
+    # .cat.codes returns -1 for any NaN; BMI is capped at 60 before this runs
+    # so all values fall within [0, 60] and no -1 codes are produced.
     df["bmi_category"] = pd.cut(
         df["BMI"],
         bins=[0, 18.5, 25, 30, 35, 40, 60],
         labels=[0, 1, 2, 3, 4, 5],
         include_lowest=True,
-    ).astype("int8")
+    ).cat.codes.astype("int8")
 
     df["cardiometabolic_risk"] = (
         df["HighBP"]
