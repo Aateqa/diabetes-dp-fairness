@@ -16,12 +16,11 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
-    roc_auc_score,
-    brier_score_loss,
 )
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE
 from data_loader_diabetes import load_raw_diabetes_data
+from metrics import safe_auc, safe_brier, compute_fairness_metrics
 
 
 FEATURE_SET_NAME = "Without Sensitive Attributes + Proxy-Reduced Features"
@@ -68,89 +67,6 @@ class IRMMLP(nn.Module):
         return self.network(x).view(-1)
 
 
-def safe_auc(y_true, y_prob):
-    try:
-        return roc_auc_score(y_true, y_prob)
-    except ValueError:
-        return np.nan
-
-
-def safe_brier(y_true, y_prob):
-    try:
-        return brier_score_loss(y_true, y_prob)
-    except ValueError:
-        return np.nan
-
-
-def compute_group_metrics(y_true, y_pred, y_prob, sensitive_values):
-    rows = []
-
-    y_true = np.asarray(y_true).astype(int)
-    y_pred = np.asarray(y_pred).astype(int)
-    y_prob = np.asarray(y_prob)
-    sensitive_values = np.asarray(sensitive_values)
-
-    for group in sorted(pd.Series(sensitive_values).dropna().unique()):
-        mask = sensitive_values == group
-
-        group_y_true = y_true[mask]
-        group_y_pred = y_pred[mask]
-        group_y_prob = y_prob[mask]
-
-        tp = ((group_y_true == 1) & (group_y_pred == 1)).sum()
-        tn = ((group_y_true == 0) & (group_y_pred == 0)).sum()
-        fp = ((group_y_true == 0) & (group_y_pred == 1)).sum()
-        fn = ((group_y_true == 1) & (group_y_pred == 0)).sum()
-
-        tpr = tp / (tp + fn) if (tp + fn) > 0 else np.nan
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else np.nan
-        fnr = fn / (fn + tp) if (fn + tp) > 0 else np.nan
-        selection_rate = group_y_pred.mean() if len(group_y_pred) > 0 else np.nan
-
-        rows.append({
-            "group": group,
-            "n_samples": int(mask.sum()),
-            "selection_rate": selection_rate,
-            "tpr": tpr,
-            "fpr": fpr,
-            "fnr": fnr,
-            "auc": safe_auc(group_y_true, group_y_prob),
-            "brier": safe_brier(group_y_true, group_y_prob),
-        })
-
-    group_df = pd.DataFrame(rows)
-
-    if group_df.empty:
-        summary = {
-            "dp_diff": np.nan,
-            "tpr_gap": np.nan,
-            "fpr_gap": np.nan,
-            "fnr_gap": np.nan,
-            "equalized_odds_diff": np.nan,
-            "worst_group_sensitivity": np.nan,
-            "macro_avg_fnr": np.nan,
-            "group_auc_mean": np.nan,
-            "group_brier_mean": np.nan,
-        }
-        return group_df, summary
-
-    tpr_gap = group_df["tpr"].max() - group_df["tpr"].min()
-    fpr_gap = group_df["fpr"].max() - group_df["fpr"].min()
-    fnr_gap = group_df["fnr"].max() - group_df["fnr"].min()
-
-    summary = {
-        "dp_diff": group_df["selection_rate"].max() - group_df["selection_rate"].min(),
-        "tpr_gap": tpr_gap,
-        "fpr_gap": fpr_gap,
-        "fnr_gap": fnr_gap,
-        "equalized_odds_diff": max(tpr_gap, fpr_gap),
-        "worst_group_sensitivity": group_df["tpr"].min(),
-        "macro_avg_fnr": group_df["fnr"].mean(),
-        "group_auc_mean": group_df["auc"].mean(),
-        "group_brier_mean": group_df["brier"].mean(),
-    }
-
-    return group_df, summary
 
 
 def predict_probabilities(model, X, device, batch_size=4096):
@@ -205,12 +121,13 @@ def evaluate_method(method_name, model, X_val, y_val, X_test, y_test, sensitive_
         "brier": safe_brier(y_test, test_prob),
     }
 
-    group_df, fairness_summary = compute_group_metrics(
+    fairness_summary = compute_fairness_metrics(
         y_true=y_test,
         y_pred=test_pred,
         y_prob=test_prob,
-        sensitive_values=sensitive_test,
+        protected_values=sensitive_test,
     )
+    group_df = pd.DataFrame()
 
     row.update(fairness_summary)
 
@@ -389,8 +306,6 @@ def plot_irm_results(results_df, output_path):
 
 
 def run_irm_experiment():
-    set_seed(RANDOM_STATE)
-
     os.makedirs(RESULTS_DIR / "irm", exist_ok=True)
     os.makedirs(GRAPHS_DIR / "irm", exist_ok=True)
 
@@ -465,6 +380,8 @@ def run_irm_experiment():
     X_target_test = scaler.transform(X.loc[target_test_idx])
     y_target_test = y.loc[target_test_idx].to_numpy()
     sensitive_target_test = sensitive.loc[target_test_idx].to_numpy()
+
+    set_seed(RANDOM_STATE)
 
     input_dim = X_source_train.shape[1]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

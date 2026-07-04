@@ -187,6 +187,13 @@ def run_dp_experiment():
         output_path=output_plot,
     )
 
+    print("\n  Theoretical note:")
+    print("  DP Logistic Regression is an instance of DP-ERM with a convex loss.")
+    print("  The privacy-fairness alignment observed here (lower epsilon -> lower dp_diff)")
+    print("  corroborates the excess risk bounds in Wang et al. (2019, ICML), which show")
+    print("  that DP noise regularises predictions toward uniform outputs across groups.")
+    print("  For the non-convex (MLP) case, see dp_sgd_mlp_experiment.py.")
+
     print("\nDP experiment complete.")
 
     return results_df

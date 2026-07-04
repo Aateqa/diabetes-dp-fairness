@@ -76,22 +76,36 @@ pip install -r requirements.txt
 
 ## How to Run
 
-Run `main.py` first since `compare_all_results.py` and `plot_tradeoffs.py` depend on its outputs.
+### Run everything at once (recommended)
+
+```bash
+source venv/bin/activate
+python -u run_all.py
+```
+
+This runs all 10 experiments sequentially, prints live progress for each step, and saves all results to `results/` and all plots to `graphs/`. The `-u` flag disables output buffering so logs appear immediately. Total runtime is roughly 1 to 2 hours depending on your machine.
+
+### Run individual experiments
+
+If you want to rerun just one step without rerunning everything:
 
 ```bash
 source venv/bin/activate
 
-python main.py                  # 5-fold CV on all models, raw and balanced datasets
-python dp_training.py           # Differential privacy sweep over epsilon values
-python vfae_experiment.py       # Full VFAE training with threshold tuning
-python causal_analysis.py       # DoWhy backdoor causal estimate
-python counterfactual_diabetes.py   # Counterfactual fairness analysis
-python shap_analysis.py         # SHAP feature importance
-python transfer_experiment.py   # Transfer learning and subgroup generalisation
+python -u main.py                      # 5-fold CV on all models, raw and balanced datasets
+python -u dp_training.py               # Differential privacy sweep over epsilon values
+python -u dp_sgd_mlp_experiment.py     # Opacus DP-SGD MLP privacy sweep
+python -u vfae_experiment.py           # Full VFAE training with threshold tuning
+python -u causal_analysis.py           # DoWhy backdoor causal estimate
+python -u counterfactual_diabetes.py   # Counterfactual fairness analysis
+python -u shap_analysis.py             # SHAP feature importance
+python -u transfer_experiment.py       # Transfer learning and subgroup generalisation
+python -u irm_experiment.py            # Invariant Risk Minimization
+python -u membership_inference_experiment.py   # Privacy attack: membership inference vs DP
 
-python compare_all_results.py   # Unified comparison across all methods
-python plot_tradeoffs.py        # Fairness-utility tradeoff plots
-python plot_calibration_roc.py  # Calibration and ROC curves
+python -u compare_all_results.py       # Unified comparison across all methods (run last)
+python -u plot_tradeoffs.py            # Fairness-utility tradeoff plots
+python -u plot_calibration_roc.py      # Calibration and ROC curves
 ```
 
 ---
@@ -120,7 +134,10 @@ python plot_calibration_roc.py  # Calibration and ROC curves
 | MLP | Neural Network |
 | Fairlearn ExponentiatedGradient | Fairness-Constrained (Demographic Parity) |
 | VFAE | Fair Deep Representation (adversarial + VAE) |
-| DP Logistic Regression (epsilon in 0.1, 0.5, 1, 5, inf) | Differential Privacy |
+| DP Logistic Regression (epsilon in 0.1, 0.5, 1, 5, inf) | Differential Privacy — convex DP-ERM (Wang et al. 2019) |
+| DP-SGD MLP with fixed clipping | Differential Privacy — non-convex DP-ERM (Wang et al. 2019) |
+| DP-SGD MLP with adaptive clipping | Heavy-tailed gradient analysis (Wang et al. 2020) |
+| Membership inference attack (loss-based) | Empirical privacy audit: attack AUC vs epsilon (Yeom et al. 2018; Wang et al. 2019) |
 
 ### Fairness Metrics
 
@@ -155,12 +172,14 @@ The gap between Naive and Oracle quantifies generalisation failure. The remainin
 
 | Finding | Result |
 |---|---|
-| Stricter DP noise reduces demographic parity difference | epsilon=0.1: dp_diff=0.0002 vs non-private: dp_diff=0.034 |
-| VFAE with threshold=0.15 | recall=0.80, FNR=0.20, worst-group sensitivity=0.79, FNR gap=0.023 |
-| Counterfactual fairness ratio (sex flip) | 4.6% of predictions change when sex is flipped |
+| Stricter DP noise reduces demographic parity difference | epsilon=0.1: dp_diff=0.0002 vs non-private: dp_diff=0.034 — consistent with the privacy-fairness alignment studied in Wang et al. (2019) |
+| DP-SGD MLP at epsilon=3.0 (Opacus) | AUC=0.803, recall=0.675, worst-group sensitivity=0.655, dp_diff=0.030 — privacy cost trades against group sensitivity as predicted by DP-ERM theory |
+| IRM vs ERM on low-income target domain | IRM does not improve AUC but reduces FNR gap from 0.0196 to 0.0154 and dp_diff from 0.0148 to 0.0132 — causal invariance improves fairness stability without sacrificing utility |
+| VFAE with threshold tuning | recall=0.80, FNR=0.20, worst-group sensitivity=0.79, FNR gap=0.023 — competitive with boosting under clinically motivated metrics |
+| Counterfactual fairness ratio (sex flip) | 4.6% of predictions change when sex is flipped — model is not fully counterfactually fair |
 | Causal (DoWhy backdoor) obesity to diabetes effect | 0.1375 after adjustment vs naive 0.1398 - confounding is modest but present |
 
-Full 5-fold results are saved to `results/` after running `python main.py`.
+Full 5-fold results are saved to `results/` after running `python -u run_all.py`.
 
 ---
 
@@ -168,10 +187,11 @@ Full 5-fold results are saved to `results/` after running `python main.py`.
 
 | Internship Topic | This Project |
 |---|---|
-| Fair ML algorithms | Fairlearn EG, VFAE, fairness metrics across 5 protected attributes |
-| Causality for de-biasing | DoWhy backdoor estimation, counterfactual fairness ratio, counterfactual sensitivity analysis |
-| Transfer learning and causality | Subgroup generalisation experiment, IPS baseline, gap motivates causal invariant learning |
-| Differential privacy | DP-LR sweep, privacy-fairness interaction, grounded in DP-ERM theory |
+| Fair ML algorithms | Fairlearn EG, VFAE, fairness metrics across 5 protected attributes; primary evaluation on worst-case group sensitivity and macro-averaged FNR rather than raw AUC |
+| Causality for de-biasing | DoWhy backdoor estimation, counterfactual fairness ratio (Kusner et al. 2017), counterfactual sensitivity analysis across sex and age |
+| Transfer learning and causality | IPS-weighted transfer baseline, IRM experiment showing causal invariance improves fairness stability across income subgroups |
+| Differential privacy | DP-LR (convex DP-ERM) and DP-SGD MLP (non-convex DP-ERM) across epsilon values; adaptive vs fixed gradient clipping to address heavy-tailed gradient distributions in BRFSS; empirical tradeoffs corroborate Wang et al. (2019, 2020, ICML) |
+| Privacy attacks in ML | Loss-based membership inference attack (Yeom et al., 2018) against non-private and DP-SGD MLPs; attack AUC vs epsilon empirically validates the DP-ERM membership leakage bound O(epsilon / sqrt(n)) from Wang et al. (2019) |
 
 ---
 
@@ -183,3 +203,5 @@ Full 5-fold results are saved to `results/` after running `python main.py`.
 4. Schölkopf et al. (2012). *On causal and anticausal learning.*
 5. Wang et al. (2019). *Differentially Private Empirical Risk Minimization with Non-Convex Loss Functions.* ICML.
 6. Wang and Xu (2019). *On Sparse Linear Regression in the Local Differential Privacy Model.* ICML.
+7. Yeom et al. (2018). *Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting.* IEEE CSF.
+8. Wang et al. (2020). *Differentially Private SGD with Large Cohorts.* ICML.

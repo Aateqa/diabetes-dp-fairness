@@ -25,7 +25,9 @@ METHOD_COLORS = {
     "Fair Deep Representation": "mediumpurple",
     "DP-SGD Deep Learning": "sienna",
     "Invariant Learning": "teal",
+    "Transfer Learning": "goldenrod",
     "Transfer/Oracle": "slategray",
+    "Privacy Attack": "crimson",
 }
 
 
@@ -37,7 +39,7 @@ def load_cv_results():
     """
     path = RESULTS_DIR / "raw_dataset" / "final_cv_results_all_models.csv"
     if not path.exists():
-        print(f"  CV results not found: {path}  →  run main.py first.")
+        print(f"  CV results not found: {path}  ->  run main.py first.")
         return None
 
     df = pd.read_csv(path)
@@ -73,7 +75,7 @@ def load_dp_results():
     """Loads DP Logistic Regression results across epsilon values."""
     path = RESULTS_DIR / "dp" / "dp_logistic_regression_results.csv"
     if not path.exists():
-        print(f"  DP results not found: {path}  →  run dp_training.py first.")
+        print(f"  DP results not found: {path}  ->  run dp_training.py first.")
         return None
 
     df = pd.read_csv(path)
@@ -102,7 +104,7 @@ def load_dp_sgd_mlp_results():
     """Loads Opacus DP-SGD MLP results across epsilon values."""
     path = RESULTS_DIR / "dp_sgd_mlp" / "dp_sgd_mlp_results.csv"
     if not path.exists():
-        print(f"  DP-SGD MLP results not found: {path}  →  run dp_sgd_mlp_experiment.py first.")
+        print(f"  DP-SGD MLP results not found: {path}  ->  run dp_sgd_mlp_experiment.py first.")
         return None
 
     df = pd.read_csv(path)
@@ -110,17 +112,15 @@ def load_dp_sgd_mlp_results():
 
     for _, row in df.iterrows():
         method = row.get("method", "DP-SGD MLP")
-        epsilon = row.get("epsilon", np.nan)
+        clipping = row.get("clipping", "fixed")
 
         if method == "MLP non-private":
             model_name = "MLP non-private"
             method_type = "Standard"
         else:
             target_eps = row.get("target_epsilon", np.nan)
-            if pd.notna(target_eps):
-                model_name = f"DP-SGD MLP (ε={target_eps})"
-            else:
-                model_name = method
+            clip_tag = f" [{clipping}]" if pd.notna(clipping) and clipping != "none" else ""
+            model_name = f"DP-SGD MLP (ε={target_eps}){clip_tag}" if pd.notna(target_eps) else method
             method_type = "DP-SGD Deep Learning"
 
         rows.append({
@@ -145,7 +145,7 @@ def load_irm_results():
     """Loads ERM, IRM, and oracle target-domain generalisation results."""
     path = RESULTS_DIR / "irm" / "irm_experiment_results.csv"
     if not path.exists():
-        print(f"  IRM results not found: {path}  →  run irm_experiment.py first.")
+        print(f"  IRM results not found: {path}  ->  run irm_experiment.py first.")
         return None
 
     df = pd.read_csv(path)
@@ -163,7 +163,7 @@ def load_irm_results():
             "model": method,
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": method_type,
-            "eval_protocol": "Source→Target Holdout",
+            "eval_protocol": "Source->Target Holdout",
             "auc": row.get("auc"),
             "f1": row.get("f1"),
             "recall": row.get("recall"),
@@ -181,7 +181,7 @@ def load_vfae_results():
     """Loads VFAE test metrics."""
     path = RESULTS_DIR / "vfae" / "vfae_test_metrics.csv"
     if not path.exists():
-        print(f"  VFAE results not found: {path}  →  run vfae_experiment.py first.")
+        print(f"  VFAE results not found: {path}  ->  run vfae_experiment.py first.")
         return None
 
     row = pd.read_csv(path).iloc[0]
@@ -199,6 +199,65 @@ def load_vfae_results():
         "worst_group_sensitivity": row.get("worst_group_sensitivity"),
         "macro_avg_fnr": row.get("macro_avg_fnr"),
     }])
+
+
+def load_membership_inference_results():
+    """Loads membership inference attack AUC results per epsilon."""
+    path = RESULTS_DIR / "membership_inference" / "membership_inference_results.csv"
+    if not path.exists():
+        print(f"  Membership inference results not found: {path}  ->  run membership_inference_experiment.py first.")
+        return None
+
+    df = pd.read_csv(path)
+    rows = []
+    for _, row in df.iterrows():
+        method = row.get("method", "")
+        rows.append({
+            "model": method,
+            "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
+            "method_type": "Privacy Attack",
+            "eval_protocol": "Holdout",
+            "auc": row.get("attack_auc"),
+            "f1": np.nan,
+            "recall": np.nan,
+            "fnr": np.nan,
+            "dp_diff": np.nan,
+            "fnr_gap": np.nan,
+            "worst_group_sensitivity": np.nan,
+            "macro_avg_fnr": np.nan,
+            "attack_auc": row.get("attack_auc"),
+            "attack_advantage": row.get("attack_advantage"),
+        })
+    return pd.DataFrame(rows)
+
+
+def load_transfer_results():
+    """Loads Oracle / Naive / IPS transfer experiment results."""
+    path = RESULTS_DIR / "transfer" / "transfer_experiment_results.csv"
+    if not path.exists():
+        print(f"  Transfer results not found: {path}  -  run transfer_experiment.py first.")
+        return None
+
+    df = pd.read_csv(path)
+    rows = []
+    for _, row in df.iterrows():
+        method = row["method"]
+        method_type = "Transfer/Oracle" if "Oracle" in method else "Transfer Learning"
+        rows.append({
+            "model": method,
+            "feature_set": "Without Sensitive Attributes",
+            "method_type": method_type,
+            "eval_protocol": "Holdout",
+            "auc": row.get("auc"),
+            "f1": row.get("f1"),
+            "recall": row.get("recall"),
+            "fnr": row.get("fnr"),
+            "dp_diff": row.get("dp_diff"),
+            "fnr_gap": row.get("fnr_gap"),
+            "worst_group_sensitivity": row.get("worst_group_sensitivity"),
+            "macro_avg_fnr": np.nan,
+        })
+    return pd.DataFrame(rows)
 
 
 def plot_scatter_comparison(df, output_dir):
@@ -307,6 +366,8 @@ def main():
     dp_sgd_mlp_df = load_dp_sgd_mlp_results()
     vfae_df = load_vfae_results()
     irm_df = load_irm_results()
+    transfer_df = load_transfer_results()
+    mi_df = load_membership_inference_results()
 
     available = [
         df for df in [
@@ -315,6 +376,8 @@ def main():
             dp_sgd_mlp_df,
             vfae_df,
             irm_df,
+            transfer_df,
+            mi_df,
         ]
         if df is not None
     ]

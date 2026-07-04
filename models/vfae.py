@@ -276,7 +276,7 @@ class VFAEClassifier:
         # Tune threshold on val set using F1.
         val_probs = self._infer(X_val_sc)
         best_f1, best_t = -1.0, 0.25
-        for t in [0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]:
+        for t in [0.03, 0.05, 0.07, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]:
             preds = (val_probs >= t).astype(int)
             f = f1_score(y_val, preds, zero_division=0)
             if f > best_f1:
