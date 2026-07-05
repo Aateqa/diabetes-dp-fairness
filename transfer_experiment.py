@@ -83,6 +83,7 @@ def evaluate(model, X_test, y_test, sex_test):
         "dp_diff": fairness["dp_diff"],
         "fnr_gap": fairness["fnr_gap"],
         "worst_group_sensitivity": fairness["worst_group_sensitivity"],
+        "macro_avg_fnr": fairness["macro_avg_fnr"],
     }
 
 
@@ -150,10 +151,19 @@ def run_transfer_experiment():
     # --- 3. Importance-weighted transfer ---
     print("\n[3/3] Importance-weighted (IPS) transfer")
     weights = estimate_importance_weights(X_src.values, X_tgt_train.values)
+    print(
+        "      Weight summary: "
+        f"min={weights.min():.3f} | p50={np.median(weights):.3f} | "
+        f"max={weights.max():.3f} | std={weights.std():.3f}"
+    )
     ips = make_xgb_model(random_state=RANDOM_STATE)
     ips.fit(X_src, y_src, sample_weight=weights)
     m = evaluate(ips, X_tgt_test, y_tgt_test, sex_tgt_test)
     m["method"] = "IPS-weighted transfer"
+    m["weight_min"] = float(weights.min())
+    m["weight_median"] = float(np.median(weights))
+    m["weight_max"] = float(weights.max())
+    m["weight_std"] = float(weights.std())
     results.append(m)
     print(f"      AUC={m['auc']:.4f}  F1={m['f1']:.4f}  "
           f"dp_diff={m['dp_diff']:.4f}  fnr_gap={m['fnr_gap']:.4f}")

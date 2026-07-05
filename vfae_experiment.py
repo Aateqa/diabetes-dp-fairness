@@ -16,6 +16,7 @@ from sklearn.metrics import (
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
 from data_loader_diabetes import load_raw_diabetes_data
+from metrics import compute_fairness_metrics, compute_group_rates
 from models.vfae import VFAEClassifier
 
 
@@ -105,58 +106,15 @@ def run_vfae_experiment():
         "brier": safe_brier(y_test, y_prob),
     }
 
-    # Local group fairness metrics for standalone VFAE.
-    group_rows = []
-    y_test_arr = np.asarray(y_test).astype(int)
-    y_pred_arr = np.asarray(y_pred).astype(int)
-    y_prob_arr = np.asarray(y_prob)
-    s_test_arr = np.asarray(s_test)
-
-    for group in sorted(pd.Series(s_test_arr).dropna().unique()):
-        mask = s_test_arr == group
-
-        group_y_true = y_test_arr[mask]
-        group_y_pred = y_pred_arr[mask]
-        group_y_prob = y_prob_arr[mask]
-
-        tp = ((group_y_true == 1) & (group_y_pred == 1)).sum()
-        tn = ((group_y_true == 0) & (group_y_pred == 0)).sum()
-        fp = ((group_y_true == 0) & (group_y_pred == 1)).sum()
-        fn = ((group_y_true == 1) & (group_y_pred == 0)).sum()
-
-        tpr = tp / (tp + fn) if (tp + fn) > 0 else np.nan
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else np.nan
-        fnr = fn / (fn + tp) if (fn + tp) > 0 else np.nan
-        selection_rate = group_y_pred.mean() if len(group_y_pred) > 0 else np.nan
-
-        group_rows.append({
-            "group": group,
-            "n_samples": int(mask.sum()),
-            "selection_rate": selection_rate,
-            "tpr": tpr,
-            "fpr": fpr,
-            "fnr": fnr,
-            "auc": safe_auc(group_y_true, group_y_prob),
-            "brier": safe_brier(group_y_true, group_y_prob),
-        })
-
-    group_df = pd.DataFrame(group_rows)
+    group_df = compute_group_rates(
+        y_true=y_test,
+        y_pred=y_pred,
+        y_prob=y_prob,
+        group_values=s_test,
+    )
 
     if not group_df.empty:
-        metrics.update({
-            "dp_diff": group_df["selection_rate"].max() - group_df["selection_rate"].min(),
-            "tpr_gap": group_df["tpr"].max() - group_df["tpr"].min(),
-            "fpr_gap": group_df["fpr"].max() - group_df["fpr"].min(),
-            "fnr_gap": group_df["fnr"].max() - group_df["fnr"].min(),
-            "equalized_odds_diff": max(
-                group_df["tpr"].max() - group_df["tpr"].min(),
-                group_df["fpr"].max() - group_df["fpr"].min(),
-            ),
-            "worst_group_sensitivity": group_df["tpr"].min(),
-            "macro_avg_fnr": group_df["fnr"].mean(),
-            "group_auc_mean": group_df["auc"].mean(),
-            "group_brier_mean": group_df["brier"].mean(),
-        })
+        metrics.update(compute_fairness_metrics(y_test, y_pred, y_prob, s_test))
 
     metrics_df = pd.DataFrame([metrics])
 

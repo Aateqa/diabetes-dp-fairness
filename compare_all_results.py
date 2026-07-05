@@ -31,6 +31,12 @@ METHOD_COLORS = {
 }
 
 
+def with_comparison_group(row, comparison_group):
+    row["comparison_group"] = comparison_group
+    row["is_directly_comparable"] = comparison_group != "privacy_audit"
+    return row
+
+
 def load_cv_results():
     """
     Loads per-model mean metrics from the main 5-fold CV experiment.
@@ -53,7 +59,7 @@ def load_cv_results():
             method_type = "Fair Deep Representation"
         else:
             method_type = "Standard"
-        rows.append({
+        rows.append(with_comparison_group({
             "model": row["model"],
             "feature_set": row.get("feature_set"),
             "method_type": method_type,
@@ -66,7 +72,7 @@ def load_cv_results():
             "fnr_gap": row.get("sex_group_fnr_gap_mean"),
             "worst_group_sensitivity": row.get("sex_group_worst_group_sensitivity_mean"),
             "macro_avg_fnr": row.get("sex_group_macro_avg_fnr_mean"),
-        })
+        }, "cv_raw"))
 
     return pd.DataFrame(rows)
 
@@ -82,7 +88,7 @@ def load_dp_results():
     rows = []
     for _, row in df.iterrows():
         eps = row["epsilon"]
-        rows.append({
+        rows.append(with_comparison_group({
             "model": f"DP-LR (ε={eps})",
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": "Differential Privacy",
@@ -95,7 +101,7 @@ def load_dp_results():
             "fnr_gap": row.get("fnr_gap"),
             "worst_group_sensitivity": row.get("worst_group_sensitivity"),
             "macro_avg_fnr": row.get("macro_avg_fnr"),
-        })
+        }, "holdout_raw"))
 
     return pd.DataFrame(rows)
 
@@ -123,7 +129,7 @@ def load_dp_sgd_mlp_results():
             model_name = f"DP-SGD MLP (ε={target_eps}){clip_tag}" if pd.notna(target_eps) else method
             method_type = "DP-SGD Deep Learning"
 
-        rows.append({
+        rows.append(with_comparison_group({
             "model": model_name,
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": method_type,
@@ -136,7 +142,7 @@ def load_dp_sgd_mlp_results():
             "fnr_gap": row.get("fnr_gap"),
             "worst_group_sensitivity": row.get("worst_group_sensitivity"),
             "macro_avg_fnr": row.get("macro_avg_fnr"),
-        })
+        }, "holdout_raw"))
 
     return pd.DataFrame(rows)
 
@@ -159,7 +165,7 @@ def load_irm_results():
         else:
             method_type = "Transfer/Oracle"
 
-        rows.append({
+        rows.append(with_comparison_group({
             "model": method,
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": method_type,
@@ -172,7 +178,7 @@ def load_irm_results():
             "fnr_gap": row.get("fnr_gap"),
             "worst_group_sensitivity": row.get("worst_group_sensitivity"),
             "macro_avg_fnr": row.get("macro_avg_fnr"),
-        })
+        }, "transfer_target"))
 
     return pd.DataFrame(rows)
 
@@ -185,7 +191,7 @@ def load_vfae_results():
         return None
 
     row = pd.read_csv(path).iloc[0]
-    return pd.DataFrame([{
+    return pd.DataFrame([with_comparison_group({
         "model": "VFAE",
         "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
         "method_type": "Fair Deep Representation",
@@ -198,7 +204,7 @@ def load_vfae_results():
         "fnr_gap": row.get("fnr_gap"),
         "worst_group_sensitivity": row.get("worst_group_sensitivity"),
         "macro_avg_fnr": row.get("macro_avg_fnr"),
-    }])
+    }, "holdout_raw")])
 
 
 def load_membership_inference_results():
@@ -212,7 +218,7 @@ def load_membership_inference_results():
     rows = []
     for _, row in df.iterrows():
         method = row.get("method", "")
-        rows.append({
+        rows.append(with_comparison_group({
             "model": method,
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": "Privacy Attack",
@@ -227,7 +233,7 @@ def load_membership_inference_results():
             "macro_avg_fnr": np.nan,
             "attack_auc": row.get("attack_auc"),
             "attack_advantage": row.get("attack_advantage"),
-        })
+        }, "privacy_audit"))
     return pd.DataFrame(rows)
 
 
@@ -243,7 +249,7 @@ def load_transfer_results():
     for _, row in df.iterrows():
         method = row["method"]
         method_type = "Transfer/Oracle" if "Oracle" in method else "Transfer Learning"
-        rows.append({
+        rows.append(with_comparison_group({
             "model": method,
             "feature_set": "Without Sensitive Attributes",
             "method_type": method_type,
@@ -255,54 +261,57 @@ def load_transfer_results():
             "dp_diff": row.get("dp_diff"),
             "fnr_gap": row.get("fnr_gap"),
             "worst_group_sensitivity": row.get("worst_group_sensitivity"),
-            "macro_avg_fnr": np.nan,
-        })
+            "macro_avg_fnr": row.get("macro_avg_fnr"),
+        }, "holdout_transfer"))
     return pd.DataFrame(rows)
 
 
 def plot_scatter_comparison(df, output_dir):
-    """Scatter plots: utility metric vs fairness metric, one point per model."""
+    """Scatter plots: utility metric vs fairness metric, split by comparable protocol."""
     pairs = [
         ("auc", "dp_diff", "ROC-AUC", "DP Difference (Sex)"),
         ("auc", "fnr_gap", "ROC-AUC", "FNR Gap (Sex)"),
         ("recall", "worst_group_sensitivity", "Recall", "Worst-Group Sensitivity (Sex)"),
     ]
 
-    for x_col, y_col, x_label, y_label in pairs:
-        plot_df = df.dropna(subset=[x_col, y_col])
-        if plot_df.empty:
+    for comparison_group, group_df in df.groupby("comparison_group"):
+        if comparison_group == "privacy_audit":
             continue
+        for x_col, y_col, x_label, y_label in pairs:
+            plot_df = group_df.dropna(subset=[x_col, y_col])
+            if plot_df.empty:
+                continue
 
-        plt.figure(figsize=(12, 7))
+            plt.figure(figsize=(12, 7))
 
-        for method_type, group in plot_df.groupby("method_type"):
-            color = METHOD_COLORS.get(method_type, "gray")
-            plt.scatter(group[x_col], group[y_col], s=90, label=method_type, color=color, zorder=3)
-            for _, row in group.iterrows():
-                plt.annotate(
-                    row["model"],
-                    (row[x_col], row[y_col]),
-                    fontsize=7,
-                    xytext=(5, 5),
-                    textcoords="offset points",
-                    alpha=0.9,
-                )
+            for method_type, method_df in plot_df.groupby("method_type"):
+                color = METHOD_COLORS.get(method_type, "gray")
+                plt.scatter(method_df[x_col], method_df[y_col], s=90, label=method_type, color=color, zorder=3)
+                for _, row in method_df.iterrows():
+                    plt.annotate(
+                        row["model"],
+                        (row[x_col], row[y_col]),
+                        fontsize=7,
+                        xytext=(5, 5),
+                        textcoords="offset points",
+                        alpha=0.9,
+                    )
 
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
-        plt.title(f"All Methods - {x_label} vs {y_label}")
-        plt.legend(title="Method type", fontsize=8)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
+            plt.xlabel(x_label)
+            plt.ylabel(y_label)
+            plt.title(f"{comparison_group}: {x_label} vs {y_label}")
+            plt.legend(title="Method type", fontsize=8)
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
 
-        fname = f"scatter_{x_col}_vs_{y_col}.png"
-        plt.savefig(output_dir / fname, dpi=300)
-        plt.close()
-        print(f"  Saved: {output_dir / fname}")
+            fname = f"scatter_{comparison_group}_{x_col}_vs_{y_col}.png"
+            plt.savefig(output_dir / fname, dpi=300)
+            plt.close()
+            print(f"  Saved: {output_dir / fname}")
 
 
 def plot_bar_comparison(df, output_dir):
-    """Bar charts for key metrics across all models."""
+    """Bar charts for key metrics within each directly comparable protocol."""
     metrics = [
         ("worst_group_sensitivity", "Worst-Group Sensitivity (Sex)  ↑ higher is better", False),
         ("macro_avg_fnr", "Macro-Averaged FNR (Sex)  ↓ lower is better", True),
@@ -313,43 +322,46 @@ def plot_bar_comparison(df, output_dir):
         ("dp_diff", "DP Difference (Sex)  ↓ lower is fairer", True),
     ]
 
-    for col, label, lower_better in metrics:
-        plot_df = df.dropna(subset=[col]).copy()
-        if plot_df.empty:
+    for comparison_group, group_df in df.groupby("comparison_group"):
+        if comparison_group == "privacy_audit":
             continue
+        for col, label, lower_better in metrics:
+            plot_df = group_df.dropna(subset=[col]).copy()
+            if plot_df.empty:
+                continue
 
-        plot_df = plot_df.sort_values(col, ascending=lower_better)
-        colors = [METHOD_COLORS.get(t, "gray") for t in plot_df["method_type"]]
+            plot_df = plot_df.sort_values(col, ascending=lower_better)
+            colors = [METHOD_COLORS.get(t, "gray") for t in plot_df["method_type"]]
 
-        fig, ax = plt.subplots(figsize=(max(10, len(plot_df) * 0.8), 5))
-        bars = ax.bar(plot_df["model"], plot_df[col], color=colors)
+            fig, ax = plt.subplots(figsize=(max(10, len(plot_df) * 0.8), 5))
+            bars = ax.bar(plot_df["model"], plot_df[col], color=colors)
 
-        for bar, val in zip(bars, plot_df[col]):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + 0.002,
-                f"{val:.3f}",
-                ha="center", va="bottom", fontsize=7,
-            )
+            for bar, val in zip(bars, plot_df[col]):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 0.002,
+                    f"{val:.3f}",
+                    ha="center", va="bottom", fontsize=7,
+                )
 
-        ax.set_xlabel("Model")
-        ax.set_ylabel(label.split("  ")[0])
-        ax.set_title(f"All Methods - {label}")
-        plt.xticks(rotation=40, ha="right", fontsize=8)
-        plt.grid(axis="y", alpha=0.3)
+            ax.set_xlabel("Model")
+            ax.set_ylabel(label.split("  ")[0])
+            ax.set_title(f"{comparison_group}: {label}")
+            plt.xticks(rotation=40, ha="right", fontsize=8)
+            plt.grid(axis="y", alpha=0.3)
 
-        from matplotlib.patches import Patch
-        legend_handles = [
-            Patch(color=c, label=m) for m, c in METHOD_COLORS.items()
-            if m in plot_df["method_type"].values
-        ]
-        ax.legend(handles=legend_handles, title="Method type", fontsize=8)
+            from matplotlib.patches import Patch
+            legend_handles = [
+                Patch(color=c, label=m) for m, c in METHOD_COLORS.items()
+                if m in plot_df["method_type"].values
+            ]
+            ax.legend(handles=legend_handles, title="Method type", fontsize=8)
 
-        plt.tight_layout()
-        fname = f"bar_{col}_all_methods.png"
-        plt.savefig(output_dir / fname, dpi=300)
-        plt.close()
-        print(f"  Saved: {output_dir / fname}")
+            plt.tight_layout()
+            fname = f"bar_{comparison_group}_{col}.png"
+            plt.savefig(output_dir / fname, dpi=300)
+            plt.close()
+            print(f"  Saved: {output_dir / fname}")
 
 
 def main():
@@ -386,20 +398,33 @@ def main():
         return
 
     unified_df = pd.concat(available, ignore_index=True)
+    unified_df["primary_screening_score"] = np.nan
+    unified_df["protocol_rank"] = np.nan
 
-    # Primary screening/fairness ranking:
-    # For diabetes screening, AUC is secondary. We prioritize high worst-group
-    # sensitivity and low macro-averaged FNR.
-    if "worst_group_sensitivity" in unified_df.columns and "macro_avg_fnr" in unified_df.columns:
-        unified_df["primary_screening_score"] = (
-            unified_df["worst_group_sensitivity"] - unified_df["macro_avg_fnr"]
-        )
+    comparable_mask = (
+        unified_df["is_directly_comparable"]
+        & unified_df["worst_group_sensitivity"].notna()
+        & unified_df["macro_avg_fnr"].notna()
+    )
+    unified_df.loc[comparable_mask, "primary_screening_score"] = (
+        unified_df.loc[comparable_mask, "worst_group_sensitivity"]
+        - unified_df.loc[comparable_mask, "macro_avg_fnr"]
+    )
+    unified_df.loc[comparable_mask, "protocol_rank"] = (
+        unified_df.loc[comparable_mask]
+        .groupby("comparison_group")["primary_screening_score"]
+        .rank(ascending=False, method="min")
+    )
 
     output_csv = RESULTS_DIR / "unified_comparison.csv"
     unified_df.to_csv(output_csv, index=False)
+    protocol_csv = RESULTS_DIR / "protocol_comparison_summary.csv"
+    protocol_df = unified_df[unified_df["is_directly_comparable"]].copy()
+    protocol_df.to_csv(protocol_csv, index=False)
 
     display_cols = [
         "model", "feature_set", "method_type", "eval_protocol",
+        "comparison_group", "protocol_rank",
         "worst_group_sensitivity", "macro_avg_fnr", "fnr_gap",
         "recall", "fnr", "f1", "auc", "dp_diff",
     ]
@@ -411,6 +436,7 @@ def main():
     print(display_df.round(4).to_string(index=False, na_rep=""))
     print("=" * 80)
     print(f"\nSaved: {output_csv}")
+    print(f"Saved: {protocol_csv}")
 
     print("\nGenerating comparison plots...")
     plot_scatter_comparison(unified_df, output_dir)

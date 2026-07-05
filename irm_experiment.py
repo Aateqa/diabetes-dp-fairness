@@ -20,7 +20,7 @@ from sklearn.metrics import (
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE
 from data_loader_diabetes import load_raw_diabetes_data
-from metrics import safe_auc, safe_brier, compute_fairness_metrics
+from metrics import compute_fairness_metrics, compute_group_rates, safe_auc, safe_brier
 
 
 FEATURE_SET_NAME = "Without Sensitive Attributes + Proxy-Reduced Features"
@@ -127,7 +127,12 @@ def evaluate_method(method_name, model, X_val, y_val, X_test, y_test, sensitive_
         y_prob=test_prob,
         protected_values=sensitive_test,
     )
-    group_df = pd.DataFrame()
+    group_df = compute_group_rates(
+        y_true=y_test,
+        y_pred=test_pred,
+        y_prob=test_prob,
+        group_values=sensitive_test,
+    )
 
     row.update(fairness_summary)
 

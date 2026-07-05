@@ -1,31 +1,31 @@
 feature,mean_abs_shap,feature_set
-GenHlth,0.5171161,Original Features
-cardiometabolic_risk,0.43556362,Original Features
-Age,0.32043657,Original Features
-BMI,0.24817085,Original Features
-HighBP,0.16675287,Original Features
-age_bmi_risk,0.15476827,Original Features
-Sex,0.11717018,Original Features
-Income,0.0994273,Original Features
-any_mental_health_days,0.087651424,Original Features
-CholCheck,0.07434968,Original Features
-GenHlth,0.49503648,Without Sensitive Attributes
-cardiometabolic_risk,0.49372223,Without Sensitive Attributes
-BMI,0.3340288,Without Sensitive Attributes
-HighBP,0.19477327,Without Sensitive Attributes
-any_mental_health_days,0.15886874,Without Sensitive Attributes
-Income,0.108050674,Without Sensitive Attributes
-DiffWalk,0.08771236,Without Sensitive Attributes
-CholCheck,0.08234577,Without Sensitive Attributes
-HvyAlcoholConsump,0.07931313,Without Sensitive Attributes
-poor_general_health,0.041723423,Without Sensitive Attributes
-cardiometabolic_risk,0.4967396,Without Sensitive Attributes + Proxy-Reduced Features
-GenHlth,0.49441186,Without Sensitive Attributes + Proxy-Reduced Features
-BMI,0.33565858,Without Sensitive Attributes + Proxy-Reduced Features
-HighBP,0.19816157,Without Sensitive Attributes + Proxy-Reduced Features
-any_mental_health_days,0.16569439,Without Sensitive Attributes + Proxy-Reduced Features
-DiffWalk,0.10180022,Without Sensitive Attributes + Proxy-Reduced Features
-poor_general_health,0.083959915,Without Sensitive Attributes + Proxy-Reduced Features
-HvyAlcoholConsump,0.083092935,Without Sensitive Attributes + Proxy-Reduced Features
-CholCheck,0.08111285,Without Sensitive Attributes + Proxy-Reduced Features
-HighChol,0.03072111,Without Sensitive Attributes + Proxy-Reduced Features
+GenHlth,0.4861721,Original Features
+cardiometabolic_risk,0.41138712,Original Features
+Age,0.30294916,Original Features
+BMI,0.23872995,Original Features
+age_bmi_risk,0.15935333,Original Features
+HighBP,0.14652357,Original Features
+Sex,0.10520138,Original Features
+Income,0.095614456,Original Features
+any_mental_health_days,0.07167065,Original Features
+HvyAlcoholConsump,0.06538361,Original Features
+GenHlth,0.48168883,Without Sensitive Attributes
+cardiometabolic_risk,0.47735107,Without Sensitive Attributes
+BMI,0.32975584,Without Sensitive Attributes
+HighBP,0.1862135,Without Sensitive Attributes
+any_mental_health_days,0.14351375,Without Sensitive Attributes
+Income,0.09802562,Without Sensitive Attributes
+DiffWalk,0.07771995,Without Sensitive Attributes
+HvyAlcoholConsump,0.07294535,Without Sensitive Attributes
+CholCheck,0.072194465,Without Sensitive Attributes
+poor_general_health,0.03763085,Without Sensitive Attributes
+GenHlth,0.48080936,Without Sensitive Attributes + Proxy-Reduced Features
+cardiometabolic_risk,0.47791398,Without Sensitive Attributes + Proxy-Reduced Features
+BMI,0.3232351,Without Sensitive Attributes + Proxy-Reduced Features
+HighBP,0.17447615,Without Sensitive Attributes + Proxy-Reduced Features
+any_mental_health_days,0.14954233,Without Sensitive Attributes + Proxy-Reduced Features
+DiffWalk,0.094768725,Without Sensitive Attributes + Proxy-Reduced Features
+poor_general_health,0.08191308,Without Sensitive Attributes + Proxy-Reduced Features
+HvyAlcoholConsump,0.075830914,Without Sensitive Attributes + Proxy-Reduced Features
+CholCheck,0.07347015,Without Sensitive Attributes + Proxy-Reduced Features
+bp_chol_combined,0.052113585,Without Sensitive Attributes + Proxy-Reduced Features

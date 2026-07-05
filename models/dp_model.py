@@ -12,7 +12,6 @@ def make_non_private_lr(random_state=RANDOM_STATE):
         ("scaler", StandardScaler()),
         ("model", LogisticRegression(
             max_iter=1000,
-            class_weight="balanced",
             solver="liblinear",
             random_state=random_state,
         )),

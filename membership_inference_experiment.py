@@ -177,15 +177,14 @@ def run_attack(model, X_train, y_train, X_test, y_test, device):
 
 
 def plot_attack_auc_vs_epsilon(results_df, output_dir):
-    dp_df = results_df[results_df["epsilon"] != "inf"].copy()
-    dp_df["epsilon_num"] = pd.to_numeric(dp_df["epsilon"], errors="coerce")
-    dp_df = dp_df.sort_values("epsilon_num")
+    dp_df = results_df[results_df["target_epsilon"].notna()].copy()
+    dp_df = dp_df.sort_values("target_epsilon")
 
     baseline_auc = results_df.loc[results_df["epsilon"] == "inf", "attack_auc"].values
     baseline_val = float(baseline_auc[0]) if len(baseline_auc) > 0 else None
 
     plt.figure(figsize=(9, 5))
-    plt.plot(dp_df["epsilon_num"].astype(str), dp_df["attack_auc"],
+    plt.plot(dp_df["target_epsilon"].astype(str), dp_df["attack_auc"],
              marker="o", color="steelblue", label="DP-SGD MLP")
     if baseline_val is not None:
         plt.axhline(baseline_val, color="tomato", linestyle="--",
@@ -248,6 +247,8 @@ def run_membership_inference_experiment():
     rows.append({
         "method": "MLP non-private",
         "epsilon": "inf",
+        "target_epsilon": np.nan,
+        "spent_epsilon": np.nan,
         "attack_auc": attack_auc,
         "attack_advantage": attack_auc - 0.5,
     })
@@ -261,6 +262,8 @@ def run_membership_inference_experiment():
         rows.append({
             "method": f"DP-SGD MLP ε={epsilon}",
             "epsilon": str(spent),
+            "target_epsilon": float(epsilon),
+            "spent_epsilon": float(spent),
             "attack_auc": attack_auc,
             "attack_advantage": attack_auc - 0.5,
         })
@@ -281,9 +284,9 @@ def run_membership_inference_experiment():
     print("\n  Theoretical note:")
     print("  DP-ERM (Wang et al., 2019, ICML) guarantees that the advantage of any")
     print("  membership inference adversary is bounded by O(epsilon / n^0.5).")
-    print("  The empirical attack AUC above should decrease toward 0.5 as epsilon")
-    print("  decreases, providing concrete validation of this theoretical guarantee")
-    print("  on the BRFSS diabetes healthcare dataset.")
+    print("  The empirical attack AUC should trend toward 0.5 as epsilon decreases,")
+    print("  but near-random attack AUCs should be interpreted cautiously: they may")
+    print("  indicate either strong privacy or simply weak attack power on this run.")
 
     print("\nMembership inference experiment complete.")
     return results_df

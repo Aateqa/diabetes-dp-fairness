@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.base import clone
@@ -10,17 +11,43 @@ from models import get_models
 from metrics import append_metric_dict, get_probabilities
 
 
+def compute_positive_class_weight(y_train):
+    y_arr = np.asarray(y_train).astype(int)
+    positives = y_arr.sum()
+    negatives = len(y_arr) - positives
+    if positives == 0:
+        return 1.0
+    return float(negatives / positives)
+
+
+def apply_dataset_aware_model_params(model_name, model, y_train):
+    pos_weight = compute_positive_class_weight(y_train)
+
+    if model_name == "XGBoost":
+        model.set_params(scale_pos_weight=max(1.0, pos_weight))
+    elif model_name == "CatBoost":
+        model.set_params(class_weights=[1.0, max(1.0, pos_weight)])
+
+    return model
+
+
 def fit_model(model_name, model, X_train, y_train, fairness_train):
     """
     Handles normal sklearn models, MLP sample weights, and Fairlearn's special API.
     """
+    model = apply_dataset_aware_model_params(model_name, model, y_train)
+
     if model_name in ("Fairlearn-DP", "VFAE"):
         sensitive_features = fairness_train[FAIRLEARN_SENSITIVE_ATTRIBUTE]
         model.fit(X_train, y_train, sensitive_features=sensitive_features)
         return model
 
     if model_name == "MLP":
-        model.fit(X_train, y_train)
+        sample_weight = np.where(np.asarray(y_train).astype(int) == 1, compute_positive_class_weight(y_train), 1.0)
+        try:
+            model.fit(X_train, y_train, model__sample_weight=sample_weight)
+        except TypeError:
+            model.fit(X_train, y_train)
         return model
 
     model.fit(X_train, y_train)

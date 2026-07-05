@@ -21,3 +21,6 @@ results/
 .DS_Store
 .vscode/
 .idea/
+
+# Local runtime caches
+.cache/

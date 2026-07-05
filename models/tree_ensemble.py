@@ -21,7 +21,7 @@ def make_xgb_model(random_state=42):
         learning_rate=0.05,
         subsample=0.9,
         colsample_bytree=0.9,
-        scale_pos_weight=6,
+        scale_pos_weight=1.0,
         eval_metric="logloss",
         random_state=random_state,
         n_jobs=-1,
@@ -47,7 +47,6 @@ def make_catboost_model(random_state=42):
         learning_rate=0.05,
         loss_function="Logloss",
         eval_metric="AUC",
-        class_weights=[1, 6],
         random_seed=random_state,
         verbose=False,
     )

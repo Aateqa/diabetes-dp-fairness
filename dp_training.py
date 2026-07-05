@@ -21,14 +21,36 @@ from models.dp_model import make_dp_lr, make_non_private_lr
 
 
 EPSILON_VALUES = [0.1, 0.5, 1.0, 5.0, np.inf]
+THRESHOLDS = [
+    0.03, 0.05, 0.07, 0.10, 0.12,
+    0.15, 0.18, 0.20, 0.22, 0.25,
+    0.30, 0.35, 0.40, 0.45, 0.50,
+]
+
+
+def tune_threshold(y_true, y_prob):
+    best_threshold = 0.5
+    best_f1 = -1.0
+
+    for threshold in THRESHOLDS:
+        y_pred = (y_prob >= threshold).astype(int)
+        score = f1_score(y_true, y_pred, zero_division=0)
+        if score > best_f1:
+            best_f1 = score
+            best_threshold = threshold
+
+    return best_threshold
 
 
 def train_and_evaluate_dp_lr(
     epsilon,
     X_train,
+    X_val,
     X_test,
     y_train,
+    y_val,
     y_test,
+    sensitive_val,
     sensitive_test,
 ):
     """
@@ -47,16 +69,21 @@ def train_and_evaluate_dp_lr(
         warnings.simplefilter("ignore")
         model.fit(X_train, y_train)
 
-    y_pred = model.predict(X_test)
+    val_prob = get_probabilities(model, X_val)
+    threshold = tune_threshold(y_val, val_prob)
+
     y_prob = get_probabilities(model, X_test)
+    y_pred = (y_prob >= threshold).astype(int)
 
     recall = recall_score(y_test, y_pred, zero_division=0)
     fairness = compute_fairness_metrics(y_test, y_pred, y_prob, sensitive_test)
+    val_fairness = compute_fairness_metrics(y_val, (val_prob >= threshold).astype(int), val_prob, sensitive_val)
 
     return {
         "epsilon": epsilon_label,
         "epsilon_numeric": 999 if np.isinf(epsilon) else epsilon,
         "is_private": is_private,
+        "threshold": threshold,
         "accuracy": accuracy_score(y_test, y_pred),
         "precision": precision_score(y_test, y_pred, zero_division=0),
         "recall": recall,
@@ -66,6 +93,8 @@ def train_and_evaluate_dp_lr(
         "dp_diff": fairness["dp_diff"],
         "fnr_gap": fairness["fnr_gap"],
         "worst_group_sensitivity": fairness["worst_group_sensitivity"],
+        "macro_avg_fnr": fairness["macro_avg_fnr"],
+        "val_dp_diff": val_fairness["dp_diff"],
     }
 
 
@@ -139,13 +168,21 @@ def run_dp_experiment():
     print(f"Sensitive attribute for dp_diff: {sensitive_attribute}")
     print(f"X shape: {X.shape}")
 
-    X_train, X_test, y_train, y_test, sensitive_train, sensitive_test = train_test_split(
+    X_trainval, X_test, y_trainval, y_test, sensitive_trainval, sensitive_test = train_test_split(
         X,
         y,
         sensitive_values,
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
         stratify=y,
+    )
+    X_train, X_val, y_train, y_val, sensitive_train, sensitive_val = train_test_split(
+        X_trainval,
+        y_trainval,
+        sensitive_trainval,
+        test_size=0.20,
+        random_state=RANDOM_STATE,
+        stratify=y_trainval,
     )
 
     results = []
@@ -157,9 +194,12 @@ def run_dp_experiment():
         row = train_and_evaluate_dp_lr(
             epsilon=epsilon,
             X_train=X_train,
+            X_val=X_val,
             X_test=X_test,
             y_train=y_train,
+            y_val=y_val,
             y_test=y_test,
+            sensitive_val=sensitive_val,
             sensitive_test=sensitive_test,
         )
 
