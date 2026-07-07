@@ -3,16 +3,16 @@ dp_sgd_mlp_experiment.py
 
 DP-SGD MLP experiment using Opacus, extended with heavy-tailed gradient analysis.
 
-Healthcare datasets like BRFSS contain features with extreme outliers (BMI,
-income) that produce heavy-tailed per-sample gradient distributions during
-training. Standard DP-SGD uses a fixed gradient clipping norm, which either
-clips too aggressively (destroying signal from outliers) or too loosely (adding
-excess noise). Wang et al. (2020, ICML) study exactly this failure mode in the
-context of DP optimisation with heavy-tailed data.
+Healthcare datasets like BRFSS may contain skewed clinical and socioeconomic
+features, so this experiment checks whether the resulting per-sample gradients
+are heavy-tailed before comparing fixed and adaptive clipping. Standard DP-SGD
+uses a fixed gradient clipping norm, while adaptive clipping uses an empirical
+gradient norm estimate as a robustness check motivated by Wang et al. (2020,
+ICML).
 
 This experiment:
   1. Measures the empirical per-sample gradient norm distribution before training
-     to confirm heavy-tailed behaviour (high kurtosis, long right tail).
+     to test whether heavy-tailed behaviour is present.
   2. Trains DP-SGD MLP with fixed clipping (C=MAX_GRAD_NORM, standard baseline).
   3. Trains DP-SGD MLP with adaptive clipping (C=median of gradient norms),
      which more closely matches the data-driven sensitivity estimation motivated
@@ -61,9 +61,10 @@ GRAD_NORM_SAMPLE_SIZE = 3000 # samples used to estimate gradient norm distributi
 
 EPSILONS = [0.5, 1.0, 3.0, 5.0, 10.0]
 THRESHOLDS = [
-    0.03, 0.05, 0.07, 0.10, 0.12,
-    0.15, 0.18, 0.20, 0.22, 0.25,
-    0.30, 0.35, 0.40, 0.45, 0.50
+    0.005, 0.01, 0.015, 0.02, 0.025,
+    0.03, 0.04, 0.05, 0.07, 0.10,
+    0.12, 0.15, 0.18, 0.20, 0.22,
+    0.25, 0.30, 0.35, 0.40, 0.45, 0.50
 ]
 
 
@@ -173,18 +174,88 @@ def predict_probabilities(model, X, device, batch_size=4096):
     return np.asarray(probs)
 
 
-def tune_threshold(y_true, y_prob):
-    best_threshold, best_f1 = 0.25, -1.0
+def tune_threshold(y_true, y_prob, sensitive_values):
+    """
+    Tune the threshold for clinical screening rather than pure F1.
+
+    In diabetes screening, false negatives are costly, so the selected threshold
+    prioritises recall and worst-group sensitivity while still penalising very
+    large FNR gaps and extremely low precision.
+    """
+    rows = []
+    best_threshold = 0.25
+    best_score = -np.inf
+
     for t in THRESHOLDS:
-        score = f1_score(y_true, (y_prob >= t).astype(int), zero_division=0)
-        if score > best_f1:
-            best_f1, best_threshold = score, t
-    return best_threshold
+        pred = (y_prob >= t).astype(int)
+
+        recall = recall_score(y_true, pred, zero_division=0)
+        precision = precision_score(y_true, pred, zero_division=0)
+        f1 = f1_score(y_true, pred, zero_division=0)
+
+        fairness = compute_fairness_metrics(
+            y_true=y_true,
+            y_pred=pred,
+            y_prob=y_prob,
+            protected_values=sensitive_values,
+        )
+
+        worst_group_sensitivity = fairness.get("worst_group_sensitivity", 0.0)
+        macro_avg_fnr = fairness.get("macro_avg_fnr", 1.0)
+        fnr_gap = fairness.get("fnr_gap", 1.0)
+
+        # Clinical/fairness-aware screening objective.
+        score = (
+            1.20 * worst_group_sensitivity
+            + 0.70 * recall
+            + 0.40 * f1
+            + 0.20 * precision
+            - 0.60 * macro_avg_fnr
+            - 0.80 * fnr_gap
+        )
+
+        # Avoid thresholds that get high recall only by becoming almost useless.
+        feasible = (
+            recall >= 0.70
+            and worst_group_sensitivity >= 0.55
+            and precision >= 0.25
+            and fnr_gap <= 0.08
+        )
+
+        row = {
+            "threshold": t,
+            "score": score,
+            "feasible": feasible,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "worst_group_sensitivity": worst_group_sensitivity,
+            "macro_avg_fnr": macro_avg_fnr,
+            "fnr_gap": fnr_gap,
+        }
+        rows.append(row)
+
+        # Prefer feasible thresholds. If none are feasible, fall back to best score.
+        effective_score = score if feasible else score - 10.0
+        if effective_score > best_score:
+            best_score = effective_score
+            best_threshold = t
+
+    tuning_df = pd.DataFrame(rows)
+
+    if not tuning_df["feasible"].any():
+        best_idx = tuning_df["score"].idxmax()
+        best_threshold = float(tuning_df.loc[best_idx, "threshold"])
+
+    return best_threshold, tuning_df
 
 
-def evaluate_model(method, epsilon, clipping, model, X_val, y_val, X_test, y_test, sensitive_test, device):
+def evaluate_model(method, epsilon, clipping, model, X_val, y_val, sensitive_val, X_test, y_test, sensitive_test, device):
     val_prob = predict_probabilities(model, X_val, device)
-    threshold = tune_threshold(y_val, val_prob)
+    threshold, tuning_df = tune_threshold(y_val, val_prob, sensitive_val)
+    tuning_df["method"] = method
+    tuning_df["epsilon"] = epsilon
+    tuning_df["clipping"] = clipping
 
     test_prob = predict_probabilities(model, X_test, device)
     test_pred = (test_prob >= threshold).astype(int)
@@ -222,7 +293,7 @@ def evaluate_model(method, epsilon, clipping, model, X_val, y_val, X_test, y_tes
         "sensitive_group": sensitive_test,
     })
 
-    return row, pred_df
+    return row, pred_df, tuning_df
 
 
 def make_pos_weight(y):
@@ -373,7 +444,7 @@ def run_dp_sgd_mlp_experiment():
 
     print("\n" + "=" * 80)
     print("DP-SGD MLP experiment  (Opacus + heavy-tail gradient analysis)")
-    print("Connects to: Wang et al. (2020, ICML) -- DP optimisation with heavy-tailed data")
+    print("Connects to: Wang et al. (2020, ICML) -- DP optimisation and clipping robustness")
     print("=" * 80)
 
     feature_sets, y, fairness_df, _ = load_raw_diabetes_data(print_summary=False)
@@ -397,6 +468,7 @@ def run_dp_sgd_mlp_experiment():
     y_train_arr = y_train.to_numpy()
     y_val_arr   = y_val.to_numpy()
     y_test_arr  = y_test.to_numpy()
+    s_val_arr   = s_val.to_numpy()
     s_test_arr  = s_test.to_numpy()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -415,29 +487,33 @@ def run_dp_sgd_mlp_experiment():
 
     all_rows = []
     all_preds = []
+    all_thresholds = []
 
     # Step 2 - non-private baseline
     print("\n[1] Training non-private MLP baseline")
     baseline = train_non_private_mlp(X_train_sc, y_train_arr, device)
-    row, pred_df = evaluate_model(
+    row, pred_df, tuning_df = evaluate_model(
         method="MLP non-private", epsilon=np.inf, clipping="none",
         model=baseline, X_val=X_val_sc, y_val=y_val_arr,
+        sensitive_val=s_val_arr,
         X_test=X_test_sc, y_test=y_test_arr, sensitive_test=s_test_arr, device=device,
     )
     all_rows.append(row)
     all_preds.append(pred_df)
+    all_thresholds.append(tuning_df)
 
     # Step 3 - DP-SGD with fixed AND adaptive clipping at each epsilon
     for epsilon in EPSILONS:
         for clip_label, clip_norm in [("fixed", MAX_GRAD_NORM), ("adaptive", adaptive_clip_norm)]:
             print(f"\n[DP] ε={epsilon}  clipping={clip_label} (C={clip_norm:.2f})")
             model, spent = train_dp_sgd_mlp(X_train_sc, y_train_arr, epsilon, clip_norm, device)
-            row, pred_df = evaluate_model(
+            row, pred_df, tuning_df = evaluate_model(
                 method=f"DP-SGD MLP ε={epsilon} [{clip_label}]",
                 epsilon=epsilon,   # store target epsilon for consistent display
                 clipping=clip_label,
                 model=model,
                 X_val=X_val_sc, y_val=y_val_arr,
+                sensitive_val=s_val_arr,
                 X_test=X_test_sc, y_test=y_test_arr,
                 sensitive_test=s_test_arr, device=device,
             )
@@ -445,6 +521,7 @@ def run_dp_sgd_mlp_experiment():
             row["spent_epsilon"]  = spent
             all_rows.append(row)
             all_preds.append(pred_df)
+            all_thresholds.append(tuning_df)
 
     results_df    = pd.DataFrame(all_rows)
     predictions_df = pd.concat(all_preds, ignore_index=True)
@@ -453,6 +530,12 @@ def run_dp_sgd_mlp_experiment():
     pred_path    = result_dir / "dp_sgd_mlp_predictions.csv"
     results_df.to_csv(results_path, index=False)
     predictions_df.to_csv(pred_path, index=False)
+
+    if all_thresholds:
+        threshold_df = pd.concat(all_thresholds, ignore_index=True)
+        threshold_path = result_dir / "dp_sgd_mlp_threshold_tuning.csv"
+        threshold_df.to_csv(threshold_path, index=False)
+        print(f"Saved: {threshold_path}")
 
     print("\n" + "=" * 80)
     print("DP-SGD MLP summary")
@@ -471,8 +554,10 @@ def run_dp_sgd_mlp_experiment():
     print("  The utility-fairness tradeoff observed here empirically corroborates the excess")
     print("  risk bounds derived in Wang et al. (2019, ICML) for DP-ERM.")
     print("  The adaptive clipping comparison connects to Wang et al. (2020, ICML), which")
-    print("  shows that standard DP-SGD with fixed clipping degrades under heavy-tailed")
-    print("  gradient distributions - a condition confirmed above for the BRFSS dataset.")
+    print("  shows that standard DP-SGD with fixed clipping can degrade under heavy-tailed")
+    print("  gradient distributions. In this BRFSS run, the measured gradient norms are")
+    print("  closer to light-tailed, so adaptive clipping is interpreted as a robustness")
+    print("  check rather than as evidence of a strongly heavy-tailed optimisation regime.")
 
     print("\nDP-SGD MLP experiment complete.")
     return results_df
