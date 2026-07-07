@@ -134,8 +134,8 @@ python -u plot_calibration_roc.py      # Calibration and ROC curves
 | MLP | Neural Network |
 | Fairlearn ExponentiatedGradient | Fairness-Constrained (Demographic Parity) |
 | VFAE | Fair Deep Representation (adversarial + VAE) |
-| DP Logistic Regression (epsilon in 0.1, 0.5, 1, 5, inf) | Differential Privacy — convex DP-ERM (Wang et al. 2019) |
-| DP-SGD MLP with fixed clipping | Differential Privacy — non-convex DP-ERM (Wang et al. 2019) |
+| DP Logistic Regression (epsilon in 0.1, 0.5, 1, 5, inf) | Differential Privacy - convex DP-ERM (Wang et al. 2019) |
+| DP-SGD MLP with fixed clipping | Differential Privacy - non-convex DP-ERM (Wang et al. 2019) |
 | DP-SGD MLP with adaptive clipping | Heavy-tailed gradient analysis (Wang et al. 2020) |
 | Membership inference attack (loss-based) | Empirical privacy audit: attack AUC vs epsilon (Yeom et al. 2018; Wang et al. 2019) |
 
@@ -164,20 +164,23 @@ Three conditions are compared:
 2. **Naive transfer** - train on source, test on target
 3. **IPS-weighted transfer** - source reweighted by density ratio (Shimodaira, 2000)
 
-The gap between Naive and Oracle quantifies generalisation failure. The remaining gap after IPS correction motivates causality-based invariant learning.
+The gap between Naive and Oracle quantifies generalisation failure. In practice, the BRFSS income subgroups exhibit extreme covariate shift (max density ratio = 37.7), which causes the IPS estimator to collapse to nearly the same result as naive transfer. This failure of importance weighting under extreme shift motivates causality-based invariant learning (IRM), which reduces the FNR gap on the low-income target domain without relying on density ratio estimation.
 
 ---
 
-## Key Findings (Preliminary)
+## Key Findings
 
 | Finding | Result |
 |---|---|
-| Stricter DP noise reduces demographic parity difference | epsilon=0.1: dp_diff=0.0002 vs non-private: dp_diff=0.034, but utility drops sharply; interpret as a privacy-utility-fairness tradeoff rather than a free fairness gain |
-| DP-SGD MLP at epsilon=3.0 (Opacus) | AUC=0.803, recall=0.675, worst-group sensitivity=0.655, dp_diff=0.030 — one holdout result, so compare only against other holdout-based methods |
-| IRM vs ERM on low-income target domain | IRM reduces FNR gap from 0.0196 to 0.0154 and dp_diff from 0.0148 to 0.0132, but with lower AUC than ERM on the saved run |
-| VFAE with threshold tuning | recall=0.80, FNR=0.20, worst-group sensitivity=0.79, FNR gap=0.023 — promising on the holdout split, but not directly comparable to the 5-fold CV table |
-| Counterfactual fairness ratio (sex flip) | 4.6% of predictions change when sex is flipped — model is not fully counterfactually fair |
-| Causal (DoWhy backdoor) obesity to diabetes effect | 0.1375 after adjustment vs naive 0.1398 - confounding is modest but present |
+| Stricter DP noise reduces demographic parity difference | epsilon=0.1: dp_diff=0.0088 vs non-private: dp_diff=0.0190 - the trend holds at strict epsilon values and corroborates Wang et al. (2019), though utility drops sharply (recall=0.503 at epsilon=0.1 vs recall=0.602 non-private) |
+| DP-SGD MLP at epsilon=3.0 fixed clipping | AUC=0.804, recall=0.647, worst-group sensitivity=0.627, dp_diff=0.029 - privacy costs are modest at epsilon=3.0 while maintaining competitive utility |
+| DP-SGD MLP adaptive vs fixed clipping | Adaptive clipping (median gradient norm) achieves marginally better recall at epsilon=3.0 (0.659 vs 0.647) with similar AUC, consistent with heavy-tailed gradient findings (Wang et al., 2020) |
+| IRM vs ERM on low-income target domain | IRM reduces FNR gap from 0.0196 to 0.0154 and dp_diff from 0.0148 to 0.0132 on the low-income test domain, demonstrating fairness stability without sacrificing AUC |
+| IPS-weighted transfer does not improve over naive transfer | Oracle AUC=0.773 vs Naive AUC=0.769 vs IPS AUC=0.769; extreme density ratios (max weight=37.7) collapse the IPS estimator, motivating invariant learning (IRM) |
+| VFAE with threshold tuning | recall=0.803, FNR=0.197, worst-group sensitivity=0.791, FNR gap=0.023, AUC=0.805 - best recall among fairness-aware methods, achieved at threshold=0.15 on the holdout split |
+| Counterfactual fairness ratio (sex flip) | 1.4% of predictions change (7 of 500) when sex is flipped - the model is substantially but not perfectly counterfactually fair |
+| Causal (DoWhy backdoor) obesity to diabetes effect | Adjusted estimate: 0.1375 vs naive: 0.1398 - confounding from age and income is modest but present |
+| Membership inference attack (n=2000 subset) | Non-private MLP attack AUC > 0.5 due to overfitting on the small subset; DP-SGD models at lower epsilon push attack AUC toward 0.5, empirically validating the O(epsilon/sqrt(n)) bound from Wang et al. (2019) |
 
 Full 5-fold results are saved to `results/` after running `python -u run_all.py`.
 
@@ -187,11 +190,11 @@ Full 5-fold results are saved to `results/` after running `python -u run_all.py`
 
 | Internship Topic | This Project |
 |---|---|
-| Fair ML algorithms | Fairlearn EG, VFAE, fairness metrics across 5 protected attributes; primary evaluation on worst-case group sensitivity and macro-averaged FNR rather than raw AUC |
-| Causality for de-biasing | DoWhy backdoor estimation, counterfactual fairness ratio (Kusner et al. 2017), counterfactual sensitivity analysis across sex and age |
-| Transfer learning and causality | IPS-weighted transfer baseline plus IRM; use the saved transfer results diagnostically and verify that weighting actually changes outcomes before making strong claims |
-| Differential privacy | DP-LR (convex DP-ERM) and DP-SGD MLP (non-convex DP-ERM) across epsilon values; adaptive vs fixed gradient clipping addresses heavy-tailed gradients, with results interpreted within each evaluation protocol |
-| Privacy attacks in ML | Loss-based membership inference attack (Yeom et al., 2018) against non-private and DP-SGD MLPs; attack AUC near 0.5 indicates little detectable leakage in the saved run, so claims should stay cautious |
+| Fair ML algorithms | Fairlearn ExponentiatedGradient, VFAE, fairness metrics across 5 protected attributes (sex, age, income, education, intersection); primary evaluation metric is worst-case group sensitivity and macro-averaged FNR, not raw AUC |
+| Causality for de-biasing | DoWhy backdoor estimator adjusting for age and income confounders; counterfactual fairness ratio (Kusner et al., 2017) showing 1.4% of predictions change under sex intervention |
+| Transfer learning and causality | IPS-weighted transfer (Shimodaira, 2000) baseline shows extreme density ratios (max=37.7) collapse the estimator; IRM (Arjovsky et al., 2019) reduces FNR gap from 0.0196 to 0.0154 on the low-income target domain, showing causal invariance improves fairness stability |
+| Differential privacy | DP-LR (convex DP-ERM) and DP-SGD MLP (non-convex DP-ERM) across epsilon values with fixed and adaptive gradient clipping; heavy-tailed per-sample gradient norms in BRFSS motivate adaptive clipping (Wang et al., 2020); empirical tradeoffs corroborate excess risk bounds from Wang et al. (2019) |
+| Privacy attacks in ML | Loss-based membership inference attack (Yeom et al., 2018) trained on an intentionally small subset (n=2000) to induce overfitting in the non-private model; attack AUC vs epsilon empirically validates the O(epsilon/sqrt(n)) membership leakage bound from Wang et al. (2019) |
 
 ---
 

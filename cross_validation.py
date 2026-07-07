@@ -10,6 +10,26 @@ from config import RESULTS_DIR, RANDOM_STATE, N_SPLITS, FAIRLEARN_SENSITIVE_ATTR
 from models import get_models
 from metrics import append_metric_dict, get_probabilities
 
+# Minimum recall target for MLP threshold selection on imbalanced data.
+# The raw BRFSS dataset is ~14% positive; default threshold=0.5 causes the MLP
+# to predict almost no positives (recall ~0.14). We tune the threshold on each
+# fold's training-set probabilities to find the lowest threshold that achieves
+# at least this recall on the positive class.
+MLP_MIN_RECALL = 0.65
+
+
+def tune_threshold_for_recall(y_true, y_prob, min_recall=MLP_MIN_RECALL):
+    """
+    Return the lowest probability threshold t such that recall >= min_recall.
+    Falls back to 0.15 if no threshold achieves the target.
+    """
+    from sklearn.metrics import precision_recall_curve
+    _, rec, thresholds = precision_recall_curve(y_true, y_prob)
+    # precision_recall_curve appends a sentinel: len(rec) = len(thresholds) + 1
+    rec_at_thresh = rec[:-1]
+    valid = thresholds[rec_at_thresh >= min_recall]
+    return float(valid.min()) if len(valid) > 0 else 0.15
+
 
 def compute_positive_class_weight(y_train):
     y_arr = np.asarray(y_train).astype(int)
@@ -105,8 +125,16 @@ def cross_validate_models(feature_sets, y, fairness_df, experiment_name="raw_dat
                     fairness_train=fairness_train,
                 )
 
-                y_pred = fold_model.predict(X_test)
                 y_prob = get_probabilities(fold_model, X_test)
+
+                if model_name == "MLP":
+                    # Tune threshold on this fold's training set probabilities
+                    # to avoid near-zero recall on the imbalanced raw dataset.
+                    y_prob_train = get_probabilities(fold_model, X_train)
+                    threshold = tune_threshold_for_recall(y_train, y_prob_train)
+                    y_pred = (y_prob >= threshold).astype(int)
+                else:
+                    y_pred = fold_model.predict(X_test)
 
                 append_metric_dict(
                     results_list=fold_results,

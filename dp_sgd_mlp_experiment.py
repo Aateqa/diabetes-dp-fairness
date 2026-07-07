@@ -95,7 +95,7 @@ def estimate_gradient_norms(X_train, y_train, device, n_samples=GRAD_NORM_SAMPLE
 
     This reveals the tail behaviour of the gradient distribution. Heavy-tailed
     features (BMI outliers, extreme income values) produce a right-skewed norm
-    distribution with high kurtosis — exactly the setting studied in Wang et al.
+    distribution with high kurtosis - exactly the setting studied in Wang et al.
     (2020, ICML) for DP optimisation under heavy-tailed data.
     """
     model = DPMLP(input_dim=X_train.shape[1]).to(device)
@@ -311,7 +311,7 @@ def train_dp_sgd_mlp(X_train, y_train, target_epsilon, clip_norm, device):
 def plot_clipping_comparison(results_df, output_dir):
     """
     Side-by-side comparison of fixed vs adaptive clipping across epsilon values.
-    Shows worst-group sensitivity and FNR gap — the metrics most affected by
+    Shows worst-group sensitivity and FNR gap - the metrics most affected by
     heavy-tailed gradient clipping decisions.
     """
     dp_df = results_df[results_df["epsilon"] != np.inf].copy()
@@ -405,7 +405,7 @@ def run_dp_sgd_mlp_experiment():
     print(f"Train / val / test: {len(X_train_sc):,} / {len(X_val_sc):,} / {len(X_test_sc):,}")
     print(f"Device           : {device}")
 
-    # Step 1 — gradient norm distribution (heavy-tail check)
+    # Step 1 - gradient norm distribution (heavy-tail check)
     print("\n[0] Estimating per-sample gradient norm distribution ...")
     grad_norms = estimate_gradient_norms(X_train_sc, y_train_arr, device)
     adaptive_clip_norm = analyse_gradient_norms(grad_norms, graph_dir)
@@ -416,7 +416,7 @@ def run_dp_sgd_mlp_experiment():
     all_rows = []
     all_preds = []
 
-    # Step 2 — non-private baseline
+    # Step 2 - non-private baseline
     print("\n[1] Training non-private MLP baseline")
     baseline = train_non_private_mlp(X_train_sc, y_train_arr, device)
     row, pred_df = evaluate_model(
@@ -427,14 +427,14 @@ def run_dp_sgd_mlp_experiment():
     all_rows.append(row)
     all_preds.append(pred_df)
 
-    # Step 3 — DP-SGD with fixed AND adaptive clipping at each epsilon
+    # Step 3 - DP-SGD with fixed AND adaptive clipping at each epsilon
     for epsilon in EPSILONS:
         for clip_label, clip_norm in [("fixed", MAX_GRAD_NORM), ("adaptive", adaptive_clip_norm)]:
             print(f"\n[DP] ε={epsilon}  clipping={clip_label} (C={clip_norm:.2f})")
             model, spent = train_dp_sgd_mlp(X_train_sc, y_train_arr, epsilon, clip_norm, device)
             row, pred_df = evaluate_model(
                 method=f"DP-SGD MLP ε={epsilon} [{clip_label}]",
-                epsilon=spent,
+                epsilon=epsilon,   # store target epsilon for consistent display
                 clipping=clip_label,
                 model=model,
                 X_val=X_val_sc, y_val=y_val_arr,
@@ -472,7 +472,7 @@ def run_dp_sgd_mlp_experiment():
     print("  risk bounds derived in Wang et al. (2019, ICML) for DP-ERM.")
     print("  The adaptive clipping comparison connects to Wang et al. (2020, ICML), which")
     print("  shows that standard DP-SGD with fixed clipping degrades under heavy-tailed")
-    print("  gradient distributions — a condition confirmed above for the BRFSS dataset.")
+    print("  gradient distributions - a condition confirmed above for the BRFSS dataset.")
 
     print("\nDP-SGD MLP experiment complete.")
     return results_df

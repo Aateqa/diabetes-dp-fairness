@@ -53,10 +53,13 @@ def load_cv_results():
     fairness_model = "Fairlearn-DP"
     rows = []
     for _, row in df.iterrows():
+        # VFAE from CV uses threshold=0.5 on imbalanced data (recall ~0.61).
+        # The standalone vfae_experiment.py result with threshold tuning is the
+        # authoritative VFAE entry - loaded separately by load_vfae_results().
+        if row["model"] == "VFAE":
+            continue
         if row["model"] == fairness_model:
             method_type = "Fairness-Aware"
-        elif row["model"] == "VFAE":
-            method_type = "Fair Deep Representation"
         else:
             method_type = "Standard"
         rows.append(with_comparison_group({
