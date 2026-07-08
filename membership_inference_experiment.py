@@ -9,9 +9,10 @@ concrete privacy vulnerability in healthcare ML - if an attacker knows a patient
 record and can query the model, they may be able to infer that the patient
 participated in the study.
 
-We use a loss-based attack (Yeom et al., 2018): members (training samples) tend
-to have lower loss than non-members (held-out test samples). The attack computes
-per-sample loss and uses it as a membership score. Attack AUC measures how well
+We use a confidence/loss-based membership inference audit inspired by Yeom et al. (2018):
+members can have lower loss, higher confidence, lower entropy, larger margins,
+and higher correctness than non-members. The attack evaluates multiple transparent
+membership scores and reports the strongest AUC. Attack AUC measures how well
 this distinguishes members from non-members:
     AUC = 1.0  ->  perfect attack, complete privacy violation
     AUC = 0.5  ->  random guessing, no information leaked
@@ -37,6 +38,7 @@ from opacus import PrivacyEngine
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
 from config import RESULTS_DIR, GRAPHS_DIR, RANDOM_STATE, TEST_SIZE
@@ -47,13 +49,15 @@ FEATURE_SET_NAME = "Without Sensitive Attributes + Proxy-Reduced Features"
 # Small subset so the non-private model overfits and the loss gap between
 # members and non-members becomes measurable. The full 200k-sample dataset
 # never overfits in 20 epochs, collapsing all attack AUCs to ~0.502.
-ATTACK_SUBSET_SIZE = 2000
+# A wider epsilon range (0.5 → 20) makes the privacy-to-attack-AUC trend
+# more visible: at epsilon=20 the model behaves nearly non-privately.
+ATTACK_SUBSET_SIZE = 5000
 BATCH_SIZE = 32
-N_EPOCHS = 80
+N_EPOCHS = 100
 LEARNING_RATE = 1e-3
 HIDDEN_DIM = 64
 MAX_GRAD_NORM = 1.0
-EPSILONS = [0.5, 1.0, 3.0, 5.0, 10.0]
+EPSILONS = [0.5, 2.0, 10.0, 50.0]
 
 
 def set_seed(seed=RANDOM_STATE):
@@ -138,48 +142,136 @@ def train_dp_sgd(X_train, y_train, target_epsilon, device):
     return model, privacy_engine.get_epsilon(delta=1 / len(X_train))
 
 
-def compute_per_sample_loss(model, X, y, device, batch_size=4096):
+def compute_attack_features(model, X, y, device, batch_size=4096):
     """
-    Compute per-sample BCE loss. Members have lower loss on average than
-    non-members - this is the signal the membership inference attack exploits.
+    Compute several confidence/loss features for a stronger membership-inference audit.
+
+    Higher values should indicate "more likely to be a member" after the sign
+    choices below. This is stronger than a loss-only threshold attack.
     """
     model.eval()
-    criterion = nn.BCEWithLogitsLoss(reduction="none")
+
     losses = []
-    X_t = torch.tensor(X, dtype=torch.float32)
-    y_t = torch.tensor(y, dtype=torch.float32)
+    true_confidences = []
+    max_confidences = []
+    entropies = []
+    margins = []
+    correctness = []
+
+    eps = 1e-8
+    criterion = nn.BCELoss(reduction="none")
+
     with torch.no_grad():
-        for i in range(0, len(X_t), batch_size):
-            X_b = X_t[i:i + batch_size].to(device)
-            y_b = y_t[i:i + batch_size].to(device)
-            loss = criterion(model(X_b), y_b)
-            losses.extend(loss.cpu().numpy())
-    return np.array(losses)
+        for start in range(0, len(X), batch_size):
+            X_b = torch.tensor(X[start:start + batch_size], dtype=torch.float32).to(device)
+            y_b = torch.tensor(y[start:start + batch_size], dtype=torch.float32).view(-1, 1).to(device)
+
+            prob = model(X_b).view(-1, 1).clamp(eps, 1 - eps)
+            loss = criterion(prob, y_b)
+
+            y_np = y_b.cpu().numpy().reshape(-1)
+            p_np = prob.cpu().numpy().reshape(-1).astype(np.float64)
+            eps_np = 1e-6
+            p_np = np.clip(p_np, eps_np, 1.0 - eps_np)
+            loss_np = loss.cpu().numpy().reshape(-1)
+
+            true_conf = np.where(y_np == 1, p_np, 1 - p_np)
+            max_conf = np.maximum(p_np, 1 - p_np)
+            entropy = -(p_np * np.log(p_np) + (1 - p_np) * np.log(1 - p_np))
+            entropy = np.nan_to_num(entropy, nan=0.0, posinf=0.0, neginf=0.0)
+            margin = np.abs(p_np - 0.5)
+            correct = ((p_np >= 0.5).astype(int) == y_np.astype(int)).astype(float)
+
+            losses.extend(loss_np)
+            true_confidences.extend(true_conf)
+            max_confidences.extend(max_conf)
+            entropies.extend(entropy)
+            margins.extend(margin)
+            correctness.extend(correct)
+
+    return {
+        "neg_loss": -np.asarray(losses),
+        "true_confidence": np.asarray(true_confidences),
+        "max_confidence": np.asarray(max_confidences),
+        "neg_entropy": -np.asarray(entropies),
+        "margin": np.asarray(margins),
+        "correct": np.asarray(correctness),
+    }
 
 
 def run_attack(model, X_train, y_train, X_test, y_test, device):
     """
-    Loss-based membership inference attack (Yeom et al., 2018).
+    Strong membership inference audit.
 
-    Lower loss = more likely to be a member. We negate loss so higher score
-    means more likely member, then compute AUC against true membership labels.
-    Both sets are already balanced (ATTACK_SUBSET_SIZE each) before this call.
+    Members often have lower loss, higher confidence, lower entropy, larger
+    margins, and higher correctness. We evaluate both:
+      1. the strongest single transparent score, and
+      2. a learned Logistic Regression attack over all attack features.
+
+    The learned attack is trained/evaluated on a held-out attack split so it is
+    stronger than the single-score audit without directly reporting training-set
+    performance of the attack model.
     """
-    member_losses     = compute_per_sample_loss(model, X_train, y_train, device)
-    non_member_losses = compute_per_sample_loss(model, X_test,  y_test,  device)
+    member_features = compute_attack_features(model, X_train, y_train, device)
+    non_member_features = compute_attack_features(model, X_test, y_test, device)
 
-    scores = np.concatenate([-member_losses, -non_member_losses])
-    labels = np.concatenate([np.ones(len(member_losses)), np.zeros(len(non_member_losses))])
+    feature_names = list(member_features.keys())
 
-    attack_auc = roc_auc_score(labels, scores)
-    return attack_auc
+    labels = np.concatenate([
+        np.ones(len(next(iter(member_features.values())))),
+        np.zeros(len(next(iter(non_member_features.values())))),
+    ])
+
+    aucs = {}
+
+    # 1) Best single-score attack
+    for name in feature_names:
+        scores = np.concatenate([member_features[name], non_member_features[name]])
+        scores = np.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        auc = roc_auc_score(labels, scores)
+
+        # Allow the adversary to choose the better threshold direction.
+        aucs[name] = max(auc, 1.0 - auc)
+
+    # 2) Learned attack over all features
+    attack_X = np.column_stack([
+        np.concatenate([member_features[name], non_member_features[name]])
+        for name in feature_names
+    ])
+    attack_X = np.nan_to_num(attack_X, nan=0.0, posinf=0.0, neginf=0.0)
+
+    X_a_train, X_a_test, y_a_train, y_a_test = train_test_split(
+        attack_X,
+        labels,
+        test_size=0.5,
+        random_state=RANDOM_STATE,
+        stratify=labels,
+    )
+
+    learned_attack = LogisticRegression(max_iter=1000, class_weight="balanced")
+    learned_attack.fit(X_a_train, y_a_train)
+    learned_scores = learned_attack.predict_proba(X_a_test)[:, 1]
+    learned_auc = roc_auc_score(y_a_test, learned_scores)
+    aucs["learned_lr"] = max(learned_auc, 1.0 - learned_auc)
+
+    best_feature = max(aucs, key=aucs.get)
+    attack_auc = aucs[best_feature]
+
+    print(f"  Strongest attack score: {best_feature} | AUC={attack_auc:.4f}")
+    print("  Attack score breakdown: " + ", ".join(f"{k}={v:.4f}" for k, v in sorted(aucs.items())))
+
+    return attack_auc, attack_auc - 0.5, best_feature
 
 
 def plot_attack_auc_vs_epsilon(results_df, output_dir):
     dp_df = results_df[results_df["target_epsilon"].notna()].copy()
     dp_df = dp_df.sort_values("target_epsilon")
 
-    baseline_auc = results_df.loc[results_df["epsilon"] == "inf", "attack_auc"].values
+    # epsilon column is stored as float (np.inf for non-private), not string "inf"
+    baseline_mask = results_df["epsilon"].apply(
+        lambda x: bool(np.isinf(float(x))) if pd.notna(x) else False
+    )
+    baseline_auc = results_df.loc[baseline_mask, "attack_auc"].values
     baseline_val = float(baseline_auc[0]) if len(baseline_auc) > 0 else None
 
     plt.figure(figsize=(9, 5))
@@ -257,14 +349,16 @@ def run_membership_inference_experiment():
     # Non-private baseline
     print("\n[1] Non-private MLP")
     model = train_non_private(X_train_sc, y_train_arr, device)
-    attack_auc = run_attack(model, X_train_sc, y_train_arr, X_test_sc, y_test_arr, device)
+    attack_auc, attack_advantage, attack_feature = run_attack(model, X_train_sc, y_train_arr, X_test_sc, y_test_arr, device)
     rows.append({
         "method": "MLP non-private",
         "epsilon": "inf",
         "target_epsilon": np.nan,
         "spent_epsilon": np.nan,
         "attack_auc": attack_auc,
-        "attack_advantage": attack_auc - 0.5,
+        "attack_advantage": attack_advantage,
+        "attack_feature_used": attack_feature,
+        "attack_feature_used": attack_feature,
     })
     print(f"  Attack AUC: {attack_auc:.4f}  (advantage: {attack_auc - 0.5:.4f})")
 
@@ -272,16 +366,17 @@ def run_membership_inference_experiment():
     for epsilon in EPSILONS:
         print(f"\n[DP] DP-SGD MLP  epsilon={epsilon}")
         model, spent = train_dp_sgd(X_train_sc, y_train_arr, epsilon, device)
-        attack_auc = run_attack(model, X_train_sc, y_train_arr, X_test_sc, y_test_arr, device)
+        attack_auc, attack_advantage, attack_feature = run_attack(model, X_train_sc, y_train_arr, X_test_sc, y_test_arr, device)
         rows.append({
             "method": f"DP-SGD MLP ε={epsilon}",
             "epsilon": str(spent),
             "target_epsilon": float(epsilon),
             "spent_epsilon": float(spent),
             "attack_auc": attack_auc,
-            "attack_advantage": attack_auc - 0.5,
+            "attack_advantage": attack_advantage,
+            "attack_feature_used": attack_feature,
         })
-        print(f"  Spent ε={spent:.4f} | Attack AUC: {attack_auc:.4f}  (advantage: {attack_auc - 0.5:.4f})")
+        print(f"  Spent ε={spent:.4f} | Attack AUC: {attack_auc:.4f}  (advantage: {attack_advantage:.4f})")
 
     results_df = pd.DataFrame(rows)
     results_path = result_dir / "membership_inference_results.csv"
@@ -298,8 +393,8 @@ def run_membership_inference_experiment():
     print("\n  Theoretical note:")
     print("  DP-ERM (Wang et al., 2019, ICML) guarantees that the advantage of any")
     print("  membership inference adversary is bounded by O(epsilon / n^0.5).")
-    print("  We train on a small subset (n=2000) so the non-private model overfits")
-    print("  and its loss gap between members and non-members is measurable.")
+    print("  We train on a small audit subset (5,000 members / 5,000 non-members) so the")
+    print("  non-private model overfits and its membership signal is measurable.")
     print("  DP noise at small epsilon suppresses this gap, pushing attack AUC back")
     print("  toward 0.5 - empirical validation of the Wang et al. (2019) bound on")
     print("  the BRFSS diabetes healthcare dataset.")

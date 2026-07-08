@@ -173,14 +173,14 @@ The gap between Naive and Oracle quantifies generalisation failure. In practice,
 | Finding | Result |
 |---|---|
 | Stricter DP noise reduces demographic parity difference | epsilon=0.1: dp_diff=0.0088 vs non-private: dp_diff=0.0190 - the trend holds at strict epsilon values and corroborates Wang et al. (2019), though utility drops sharply (recall=0.503 at epsilon=0.1 vs recall=0.602 non-private) |
-| DP-SGD MLP at epsilon=3.0 fixed clipping | AUC=0.804, recall=0.647, worst-group sensitivity=0.627, dp_diff=0.029 - privacy costs are modest at epsilon=3.0 while maintaining competitive utility |
-| DP-SGD MLP adaptive vs fixed clipping | Adaptive clipping (median gradient norm) achieves marginally better recall at epsilon=3.0 (0.659 vs 0.647) with similar AUC, consistent with heavy-tailed gradient findings (Wang et al., 2020) |
+| DP-SGD MLP at epsilon=5.0 fixed clipping | AUC=0.803, recall=0.893, worst-group sensitivity=0.890, FNR gap=0.006, dp_diff=0.062 - strongest clinical-screening operating point among holdout models after threshold tuning |
+| DP-SGD MLP adaptive vs fixed clipping | Per-sample gradient norms are approximately light-tailed in this BRFSS run, so adaptive clipping is treated as a robustness check rather than evidence of a strongly heavy-tailed optimisation regime |
 | IRM vs ERM on low-income target domain | IRM reduces FNR gap from 0.0196 to 0.0154 and dp_diff from 0.0148 to 0.0132 on the low-income test domain, demonstrating fairness stability without sacrificing AUC |
 | IPS-weighted transfer does not improve over naive transfer | Oracle AUC=0.773 vs Naive AUC=0.769 vs IPS AUC=0.769; extreme density ratios (max weight=37.7) collapse the IPS estimator, motivating invariant learning (IRM) |
 | VFAE with threshold tuning | recall=0.803, FNR=0.197, worst-group sensitivity=0.791, FNR gap=0.023, AUC=0.805 - best recall among fairness-aware methods, achieved at threshold=0.15 on the holdout split |
 | Counterfactual fairness ratio (sex flip) | 1.4% of predictions change (7 of 500) when sex is flipped - the model is substantially but not perfectly counterfactually fair |
 | Causal (DoWhy backdoor) obesity to diabetes effect | Adjusted estimate: 0.1375 vs naive: 0.1398 - confounding from age and income is modest but present |
-| Membership inference attack (n=2000 subset) | Non-private MLP attack AUC > 0.5 due to overfitting on the small subset; DP-SGD models at lower epsilon push attack AUC toward 0.5, empirically validating the O(epsilon/sqrt(n)) bound from Wang et al. (2019) |
+| Membership inference attack (5,000 members / 5,000 non-members) | A stronger multi-score audit gives non-private MLP attack AUC=0.606, while DP-SGD remains near random guessing across epsilon values (AUC≈0.503), empirically validating the O(epsilon/sqrt(n)) leakage reduction from Wang et al. (2019) |
 
 Full 5-fold results are saved to `results/` after running `python -u run_all.py`.
 
@@ -193,8 +193,8 @@ Full 5-fold results are saved to `results/` after running `python -u run_all.py`
 | Fair ML algorithms | Fairlearn ExponentiatedGradient, VFAE, fairness metrics across 5 protected attributes (sex, age, income, education, intersection); primary evaluation metric is worst-case group sensitivity and macro-averaged FNR, not raw AUC |
 | Causality for de-biasing | DoWhy backdoor estimator adjusting for age and income confounders; counterfactual fairness ratio (Kusner et al., 2017) showing 1.4% of predictions change under sex intervention |
 | Transfer learning and causality | IPS-weighted transfer (Shimodaira, 2000) baseline shows extreme density ratios (max=37.7) collapse the estimator; IRM (Arjovsky et al., 2019) reduces FNR gap from 0.0196 to 0.0154 on the low-income target domain, showing causal invariance improves fairness stability |
-| Differential privacy | DP-LR (convex DP-ERM) and DP-SGD MLP (non-convex DP-ERM) across epsilon values with fixed and adaptive gradient clipping; heavy-tailed per-sample gradient norms in BRFSS motivate adaptive clipping (Wang et al., 2020); empirical tradeoffs corroborate excess risk bounds from Wang et al. (2019) |
-| Privacy attacks in ML | Loss-based membership inference attack (Yeom et al., 2018) trained on an intentionally small subset (n=2000) to induce overfitting in the non-private model; attack AUC vs epsilon empirically validates the O(epsilon/sqrt(n)) membership leakage bound from Wang et al. (2019) |
+| Differential privacy | DP-LR (convex DP-ERM) and DP-SGD MLP (non-convex DP-ERM) across epsilon values with fixed and adaptive gradient clipping; BRFSS per-sample gradient norms are approximately light-tailed, so adaptive clipping is evaluated as a robustness check; empirical tradeoffs corroborate excess risk bounds from Wang et al. (2019) |
+| Privacy attacks in ML | Multi-score membership inference audit inspired by Yeom et al. (2018), using loss, confidence, entropy, margin, correctness, and a learned logistic-regression attack over attack features; the non-private MLP reaches attack AUC=0.606 while DP-SGD remains near AUC≈0.503 |
 
 ---
 

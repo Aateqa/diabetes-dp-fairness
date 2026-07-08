@@ -62,8 +62,17 @@ def load_cv_results():
             method_type = "Fairness-Aware"
         else:
             method_type = "Standard"
+        # Append a short feature-set tag so bar chart x-axis labels are unique.
+        # Three feature sets × eight models = 24 rows, all sharing raw model names.
+        fs = str(row.get("feature_set", ""))
+        if "Proxy" in fs:
+            fs_tag = " [proxy]"
+        elif "Sensitive" in fs:
+            fs_tag = " [no-sens]"
+        else:
+            fs_tag = " [orig]"
         rows.append(with_comparison_group({
-            "model": row["model"],
+            "model": f"{row['model']}{fs_tag}",
             "feature_set": row.get("feature_set"),
             "method_type": method_type,
             "eval_protocol": "5-fold CV",
@@ -221,8 +230,11 @@ def load_membership_inference_results():
     rows = []
     for _, row in df.iterrows():
         method = row.get("method", "")
+        # Prefix with "MI:" so these rows don't collide in plots with the
+        # classifier rows that share the same base name (MLP non-private, etc.)
+        display_name = f"MI: {method}"
         rows.append(with_comparison_group({
-            "model": method,
+            "model": display_name,
             "feature_set": "Without Sensitive Attributes + Proxy-Reduced Features",
             "method_type": "Privacy Attack",
             "eval_protocol": "Holdout",
@@ -367,6 +379,62 @@ def plot_bar_comparison(df, output_dir):
             print(f"  Saved: {output_dir / fname}")
 
 
+def plot_membership_inference(mi_df, output_dir):
+    """
+    Attack AUC vs epsilon for the membership inference experiment.
+    Non-private baseline is drawn as a horizontal dashed line.
+    AUC should decrease toward 0.5 as epsilon decreases (Wang et al., 2019).
+    """
+    if mi_df is None or mi_df.empty:
+        return
+
+    # Strip the "MI: " prefix added in load_membership_inference_results
+    df = mi_df.copy()
+    df["label"] = df["model"].str.replace("^MI: ", "", regex=True)
+
+    baseline = df[df["label"] == "MLP non-private"]
+    dp_rows  = df[df["label"] != "MLP non-private"].copy()
+
+    # Extract numeric epsilon from attack_advantage column not available here,
+    # so parse from the label "DP-SGD MLP ε=X"
+    def parse_eps(label):
+        try:
+            return float(label.split("ε=")[-1])
+        except Exception:
+            return np.nan
+
+    dp_rows["eps_num"] = dp_rows["label"].apply(parse_eps)
+    dp_rows = dp_rows.dropna(subset=["eps_num"]).sort_values("eps_num")
+
+    if dp_rows.empty:
+        return
+
+    baseline_val = float(baseline["attack_auc"].iloc[0]) if len(baseline) > 0 else None
+
+    plt.figure(figsize=(9, 5))
+    plt.plot(
+        dp_rows["eps_num"].astype(str), dp_rows["attack_auc"],
+        marker="o", color="crimson", label="DP-SGD MLP",
+    )
+    if baseline_val is not None:
+        plt.axhline(baseline_val, color="tomato", linestyle="--",
+                    label=f"Non-private MLP (AUC={baseline_val:.3f})")
+    plt.axhline(0.5, color="gray", linestyle=":", label="Random guessing (AUC=0.5)")
+    plt.xlabel("Target privacy budget epsilon")
+    plt.ylabel("Membership inference attack AUC")
+    plt.title(
+        "Privacy Audit: Attack AUC vs Epsilon\n"
+        "DP pushes leakage toward random guessing (Wang et al., 2019, ICML)"
+    )
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = output_dir / "privacy_audit_attack_auc_vs_epsilon.png"
+    plt.savefig(path, dpi=300)
+    plt.close()
+    print(f"  Saved: {path}")
+
+
 def main():
     output_dir = GRAPHS_DIR / "comparison"
     os.makedirs(output_dir, exist_ok=True)
@@ -441,9 +509,21 @@ def main():
     print(f"\nSaved: {output_csv}")
     print(f"Saved: {protocol_csv}")
 
+    # Membership inference privacy audit — separate table and plot
+    mi_rows = unified_df[unified_df["method_type"] == "Privacy Attack"]
+    if not mi_rows.empty and "attack_auc" in mi_rows.columns:
+        print("\n" + "=" * 80)
+        print("Privacy audit (membership inference attack)")
+        print("attack_auc near 0.5 = strong privacy; near 1.0 = high leakage")
+        print("=" * 80)
+        mi_display = mi_rows[["model", "attack_auc", "attack_advantage"]].copy()
+        mi_display = mi_display.replace({None: np.nan, "None": np.nan})
+        print(mi_display.round(4).to_string(index=False, na_rep=""))
+
     print("\nGenerating comparison plots...")
     plot_scatter_comparison(unified_df, output_dir)
     plot_bar_comparison(unified_df, output_dir)
+    plot_membership_inference(mi_df, output_dir)
 
     print("\nComparison complete.")
 

@@ -20,7 +20,9 @@ MLP_MIN_RECALL = 0.65
 
 def tune_threshold_for_recall(y_true, y_prob, min_recall=MLP_MIN_RECALL):
     """
-    Return the lowest probability threshold t such that recall >= min_recall.
+    Return the highest probability threshold t such that recall >= min_recall.
+    Using the highest (most conservative) valid threshold avoids collapsing to
+    near-zero, which would make the model predict positive for everything.
     Falls back to 0.15 if no threshold achieves the target.
     """
     from sklearn.metrics import precision_recall_curve
@@ -28,7 +30,7 @@ def tune_threshold_for_recall(y_true, y_prob, min_recall=MLP_MIN_RECALL):
     # precision_recall_curve appends a sentinel: len(rec) = len(thresholds) + 1
     rec_at_thresh = rec[:-1]
     valid = thresholds[rec_at_thresh >= min_recall]
-    return float(valid.min()) if len(valid) > 0 else 0.15
+    return float(valid.max()) if len(valid) > 0 else 0.15
 
 
 def compute_positive_class_weight(y_train):
