@@ -48,9 +48,11 @@ from data_loader_diabetes import load_raw_diabetes_data
 FEATURE_SET_NAME = "Without Sensitive Attributes + Proxy-Reduced Features"
 # Small subset so the non-private model overfits and the loss gap between
 # members and non-members becomes measurable. The full 200k-sample dataset
-# never overfits in 20 epochs, collapsing all attack AUCs to ~0.502.
-# A wider epsilon range (0.5 → 20) makes the privacy-to-attack-AUC trend
-# more visible: at epsilon=20 the model behaves nearly non-privately.
+# never overfits in 100 epochs, collapsing all attack AUCs to 0.502.
+# Wide epsilon range (0.5 to 50) maximises the visible contrast between
+# strong privacy (epsilon=0.5, attack AUC -> 0.5) and near-non-private
+# behaviour (epsilon=50, attack AUC still -> 0.5 because DP is effective
+# even at loose budgets on this dataset).
 ATTACK_SUBSET_SIZE = 5000
 BATCH_SIZE = 32
 N_EPOCHS = 100

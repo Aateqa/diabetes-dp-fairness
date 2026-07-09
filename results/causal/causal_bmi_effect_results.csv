@@ -1,4 +1,4 @@
 analysis,description,estimate
 naive_difference,Difference in diabetes rate between obese and non-obese groups without adjustment,0.139768454275853
 adjusted_logistic_probability_difference,"Average predicted probability difference for BMI_obese, adjusting for Age",0.1412630092668573
-dowhy_backdoor_linear_regression,DoWhy backdoor estimate using declared DAG,0.13749590755023278
+dowhy_backdoor_linear_regression,DoWhy backdoor estimate using declared DAG,0.1374959075502346
