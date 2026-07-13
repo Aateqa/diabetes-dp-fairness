@@ -17,14 +17,22 @@ A research project applying fairness-aware training, differential privacy, causa
 
 ## Dataset
 
-**BRFSS 2015 Diabetes Health Indicators** (available on Kaggle)
+This project uses the **Diabetes Health Indicators Dataset** by Alex Teboul on Kaggle, a cleaned version of the CDC 2015 Behavioral Risk Factor Surveillance System (BRFSS).
 
 | File | Rows | Class balance |
-|---|---|---|
+|---|---:|---|
 | diabetes_binary_health_indicators_BRFSS2015.csv | 253,680 | ~14% diabetes |
 | diabetes_binary_5050split_health_indicators_BRFSS2015.csv | 70,692 | 50/50 |
 
-**Protected attributes evaluated:** Sex, Age (13 categories), Income (8 levels), Education (6 levels), Sex x Age intersection.
+**Protected attributes evaluated:** Sex, Age, Income, Education, and Sex × Age intersection.
+
+**Dataset citation:** Teboul, A. (2021). *Diabetes Health Indicators Dataset*. Kaggle. Cleaned dataset derived from the CDC 2015 Behavioral Risk Factor Surveillance System (BRFSS).
+
+**Original source:** Centers for Disease Control and Prevention. (2015). *Behavioral Risk Factor Surveillance System Survey Data and Documentation*. CDC.
+
+**Accessed:** July 2026.
+
+**Data availability:** Raw dataset files are not included in this repository. They can be downloaded from Kaggle’s *Diabetes Health Indicators Dataset* and placed in the `data/` directory before running the experiments.
 
 ---
 
@@ -208,3 +216,5 @@ Full 5-fold results are saved to `results/` after running `python -u run_all.py`
 6. Wang and Xu (2019). *On Sparse Linear Regression in the Local Differential Privacy Model.* ICML.
 7. Yeom et al. (2018). *Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting.* IEEE CSF.
 8. Wang et al. (2020). *Differentially Private SGD with Large Cohorts.* ICML.
+9. Teboul, A. (2021). *Diabetes Health Indicators Dataset*. Kaggle. Based on the CDC 2015 Behavioral Risk Factor Surveillance System (BRFSS). Available at Kaggle.
+10. Centers for Disease Control and Prevention. (2015). *Behavioral Risk Factor Surveillance System Survey Data and Documentation*. CDC.
